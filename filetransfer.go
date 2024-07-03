@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
+	"sync"
 )
 
 type Node struct {
@@ -36,7 +38,12 @@ func main() {
 	hostname := os.Args[1]
 	port := os.Args[2]
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
+
 		portLN := ":" + port
 		listener, err := net.Listen("tcp", portLN)
 		if err != nil {
@@ -59,10 +66,12 @@ func main() {
 	}()
 
 	go func() {
+		defer wg.Done()
+
 		reader1 := bufio.NewReader(os.Stdin)
-		fmt.Println("Enter message: ")
+		fmt.Println("Enter port to connect to: ")
 		portConnect, _ := reader1.ReadString('\n')
-		fmt.Scanln(&portConnect)
+		portConnect = strings.TrimSpace(portConnect)
 		serverInfo := fmt.Sprintf("%s:%s", hostname, portConnect)
 		server, err := net.Dial("tcp", serverInfo)
 
@@ -70,7 +79,7 @@ func main() {
 			fmt.Println("Error connecting to server:", err)
 			os.Exit(1)
 		}
-
+		//
 		defer server.Close()
 
 		fmt.Println("Connected to server")
@@ -85,4 +94,6 @@ func main() {
 			fmt.Println("Response:", message)
 		}
 	}()
+
+	wg.Wait()
 }
