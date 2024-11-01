@@ -156,19 +156,23 @@ func (server *Server) start() {
 	}()
 
 	// Write to server
-	// go func() {
-	// 	defer wg.Done()
+	go func() {
+		defer wg.Done()
 
-	// 	reader := bufio.NewReader(os.Stdin)
-	// 	for {
-	// 		fmt.Println("Enter message: ")
-	// 		text, _ := reader.ReadString('\n')
-	// 		fmt.Fprintf(server, text)
-
-	// 		message, _ := bufio.NewReader(server).ReadString('\n')
-	// 		fmt.Println("Response:", message)
-	// 	}
-	// }()
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Println("Enter message: ")
+			text, _ := reader.ReadString('\n')
+			for _, node := range server.knownNodes {
+				server, err := net.Dial("tcp", node.Address())
+				if err != nil {
+					fmt.Println("Error connecting to server:", node.Address())
+					continue
+				}
+				fmt.Fprintf(server, text)
+			}
+		}
+	}()
 
 	connectToMirror()
 	wg.Wait()
