@@ -3,24 +3,17 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"go-p2p/model"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
-type Node struct {
-	hostname string
-	port     string
-}
-
-func (n Node) Address() string {
-	return fmt.Sprintf("%s:%s", n.hostname, n.port)
-}
-
 type Server struct {
-	thisServer        Node
-	knownNodes        []Node
+	thisServer        model.Node
+	knownNodes        []model.Node
 	activeConnections []net.Conn
 }
 
@@ -35,7 +28,7 @@ func splitNodeInfo(node string) (string, string, error) {
 func (s *Server) networkBroadcast() {
 	for _, node := range s.knownNodes {
 		conn := s.connectToNode(node)
-		fmt.Println("Connected to", conn.LocalAddr().String())
+		fmt.Println("Connected to", conn.RemoteAddr().String())
 
 		nodeInfo := "NEW!!"
 		nodeInfo += s.thisServer.Address()
@@ -57,12 +50,12 @@ func (s *Server) addNodes(nodeList string) {
 			fmt.Println("Error:", err)
 			return
 		}
-		s.knownNodes = append(s.knownNodes, Node{host, port})
+		s.knownNodes = append(s.knownNodes, model.Node{Hostname: host, Port: port})
 	}
 	s.networkBroadcast()
 }
 
-func (s *Server) connectToNode(node Node) net.Conn {
+func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
 	conn, err := net.Dial("tcp", node.Address())
 	if err != nil {
@@ -80,7 +73,7 @@ func (s *Server) addNode(newNode string) {
 		fmt.Println("Error:", err)
 		return
 	}
-	node := Node{host, port}
+	node := model.Node{host, port}
 	s.knownNodes = append(s.knownNodes, node)
 	s.connectToNode(node)
 }
@@ -113,9 +106,10 @@ func (s *Server) connectionServer(conn net.Conn) {
 	}
 }
 
-func connectToMirror() {
+func connectToMirror(serverPort string) {
 	fmt.Println("Connecting to mirror 8080")
 	mirror := "localhost:8080"
+
 	mirrorConn, err := net.Dial("tcp", mirror)
 	if err != nil {
 		fmt.Println("Error connecting to mirror:", err)
@@ -124,8 +118,11 @@ func connectToMirror() {
 
 	defer mirrorConn.Close()
 
+	port, _ := strconv.Atoi(serverPort)
+	fmt.Fprintf(mirrorConn, "%d\n", port)
 	fmt.Println("Connected to network")
 }
+
 func (server *Server) start() {
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -134,7 +131,7 @@ func (server *Server) start() {
 	go func() {
 		defer wg.Done()
 		// Listener start up
-		portLN := ":" + server.thisServer.port
+		portLN := ":" + server.thisServer.Port
 		listener, err := net.Listen("tcp", portLN)
 		if err != nil {
 			fmt.Println("Error starting TCP:", err)
@@ -174,7 +171,7 @@ func (server *Server) start() {
 		}
 	}()
 
-	connectToMirror()
+	connectToMirror(server.thisServer.Port)
 	wg.Wait()
 }
 
@@ -186,8 +183,8 @@ func main() {
 
 	hostname := os.Args[1]
 	port := os.Args[2]
-	serverNode := Node{hostname, port}
-	server := &Server{serverNode, []Node{}, []net.Conn{}}
+	serverNode := model.Node{Hostname: hostname, Port: port}
+	server := &Server{serverNode, []model.Node{}, []net.Conn{}}
 
 	server.start()
 }
