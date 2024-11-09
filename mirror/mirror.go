@@ -1,50 +1,56 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"go-p2p/model"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 )
 
-type Node struct {
-	hostname string
-	port     int
-}
-
-func newServer(conn net.Conn, nodes *[]Node) {
+func newServer(conn net.Conn, nodes *[]model.Node) {
 	defer conn.Close()
 
-	connInfo := strings.Split(conn.RemoteAddr().String(), ":")
-	if len(connInfo) != 2 {
-		fmt.Println("Invalid address format")
-		return
-	}
-
-	hostname := connInfo[0]
-	port, err := strconv.Atoi(connInfo[1])
+	message, err := bufio.NewReader(conn).ReadString('\n')
+	message = strings.TrimSpace(message)
 	if err != nil {
-		fmt.Println("Invalid port:", err)
+		fmt.Println("Error reading message:", err)
 		return
 	}
 
-	*nodes = append(*nodes, Node{hostname, port})
-	fmt.Println("New node connected:", *nodes)
+	// hostname, port, err := net.SplitHostPort(conn.LocalAddr().String())
+	// if err != nil {
+	// 	fmt.Println("Invalid port:", err)
+	// 	return
+	// }
 
-	newConn, err := net.Dial("tcp", conn.LocalAddr().String())
+	hostname, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+	hostname = "[" + hostname + "]"
+
+	newNode := model.Node{Hostname: hostname, Port: message}
+	*nodes = append(*nodes, newNode)
+	fmt.Println("New node connected:", newNode)
+
+	address := hostname + ":" + message
+	fmt.Println("add:", address)
+
+	newConn, err := net.Dial("tcp", address)
 	if err != nil {
 		fmt.Println("Error connecting to server:", err)
 		os.Exit(1)
 	}
 
 	defer newConn.Close()
-	fmt.Println("Sending connection list to", conn.LocalAddr().String())
+	fmt.Println("Sending connection list to", newNode.Address())
 
 	networkConnections := "NODELIST!!"
 	for _, node := range *nodes {
-		networkConnections += fmt.Sprintf("%s:%d~~", node.hostname, node.port)
+		if node == newNode {
+			continue
+		}
+		networkConnections += fmt.Sprintf("%s:%s~~", node.Hostname, node.Port)
 	}
 	networkConnections += "\n"
 
@@ -79,7 +85,7 @@ func main() {
 		defer listener.Close()
 
 		fmt.Println("Listening on ", hostname, ":", port)
-		var connectedNodes []Node
+		var connectedNodes []model.Node
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
