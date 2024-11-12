@@ -18,10 +18,32 @@ type Server struct {
 }
 
 func splitNodeInfo(node string) (string, string, error) {
-	parts := strings.Split(node, ":")
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid format: expected 'hostname:port'")
+	//IPv6
+	fmt.Println("Node: ", node)
+	if node == "" {
+		return "", "", nil
 	}
+
+	if strings.HasPrefix(node, "[") {
+		endBracket := strings.Index(node, "]")
+		if endBracket == -1 || endBracket == len(node)-1 || node[endBracket+1] != ':' {
+			return "", "", fmt.Errorf("invalid IPv6 format: expected '[hostname]:port'")
+		}
+
+		hostname := node[1:endBracket]
+		port := node[endBracket+2:]
+		if port == "" {
+			return "", "", fmt.Errorf("missing port")
+		}
+		return hostname, port, nil
+	}
+
+	//IPv4
+	parts := strings.Split(node, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid IPv4 format: expected 'hostname:port'")
+	}
+
 	return parts[0], parts[1], nil
 }
 
@@ -43,14 +65,23 @@ func (s *Server) networkBroadcast() {
 }
 
 func (s *Server) addNodes(nodeList string) {
+	nodeList = strings.TrimSpace(nodeList)
+	nodeList = strings.TrimSuffix(nodeList, "~~")
 	newNodes := strings.Split(nodeList, "~~")
+	fmt.Println("New Nodes:", nodeList)
 	for _, node := range newNodes {
-		host, port, err := splitNodeInfo(node)
-		if err != nil {
-			fmt.Println("Error:", err)
-			return
+		fmt.Println(len(node))
+		if node == "" {
+			fmt.Println("here")
+			break
+		} else {
+			host, port, err := net.SplitHostPort(node)
+			if err != nil {
+				fmt.Println("Error:", err)
+				return
+			}
+			s.knownNodes = append(s.knownNodes, model.Node{Hostname: host, Port: port})
 		}
-		s.knownNodes = append(s.knownNodes, model.Node{Hostname: host, Port: port})
 	}
 	s.networkBroadcast()
 }
@@ -73,10 +104,11 @@ func (s *Server) addNode(newNode string) {
 		fmt.Println("Error:", err)
 		return
 	}
-	node := model.Node{host, port}
+	node := model.Node{Hostname: host, Port: port}
 	s.knownNodes = append(s.knownNodes, node)
 	s.connectToNode(node)
 }
+
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
@@ -91,6 +123,7 @@ func (s *Server) connectionServer(conn net.Conn) {
 		if len(headerSplit) < 2 {
 			fmt.Println("Error processing message: ", headerSplit)
 		}
+
 		header := headerSplit[0]
 		body := headerSplit[1]
 

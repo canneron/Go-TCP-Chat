@@ -47,9 +47,6 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 
 	networkConnections := "NODELIST!!"
 	for _, node := range *nodes {
-		if node == newNode {
-			continue
-		}
 		networkConnections += fmt.Sprintf("%s:%s~~", node.Hostname, node.Port)
 	}
 	networkConnections += "\n"
