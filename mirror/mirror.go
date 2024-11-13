@@ -34,7 +34,6 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 	fmt.Println("New node connected:", newNode)
 
 	address := hostname + ":" + message
-	fmt.Println("add:", address)
 
 	newConn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -57,7 +56,7 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 		return
 	}
 
-	fmt.Println("Successfully added node to network")
+	fmt.Println("Successfully added node to network\n\n")
 }
 
 func main() {
@@ -85,6 +84,7 @@ func main() {
 		var connectedNodes []model.Node
 		for {
 			conn, err := listener.Accept()
+			fmt.Println("***** Incoming Node! *****")
 			if err != nil {
 				fmt.Println("Error accepting connection:", err)
 				continue

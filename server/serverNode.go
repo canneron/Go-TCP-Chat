@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"go-p2p/model"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -17,38 +18,11 @@ type Server struct {
 	activeConnections []net.Conn
 }
 
-func splitNodeInfo(node string) (string, string, error) {
-	//IPv6
-	fmt.Println("Node: ", node)
-	if node == "" {
-		return "", "", nil
-	}
-
-	if strings.HasPrefix(node, "[") {
-		endBracket := strings.Index(node, "]")
-		if endBracket == -1 || endBracket == len(node)-1 || node[endBracket+1] != ':' {
-			return "", "", fmt.Errorf("invalid IPv6 format: expected '[hostname]:port'")
-		}
-
-		hostname := node[1:endBracket]
-		port := node[endBracket+2:]
-		if port == "" {
-			return "", "", fmt.Errorf("missing port")
-		}
-		return hostname, port, nil
-	}
-
-	//IPv4
-	parts := strings.Split(node, ":")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid IPv4 format: expected 'hostname:port'")
-	}
-
-	return parts[0], parts[1], nil
-}
-
 func (s *Server) networkBroadcast() {
 	for _, node := range s.knownNodes {
+		if node == s.thisServer {
+			continue
+		}
 		conn := s.connectToNode(node)
 		fmt.Println("Connected to", conn.RemoteAddr().String())
 
@@ -70,10 +44,9 @@ func (s *Server) addNodes(nodeList string) {
 	newNodes := strings.Split(nodeList, "~~")
 	fmt.Println("New Nodes:", nodeList)
 	for _, node := range newNodes {
-		fmt.Println(len(node))
-		if node == "" {
-			fmt.Println("here")
-			break
+		fmt.Println(node + ":" + s.thisServer.Address())
+		if node == s.thisServer.Address() {
+			continue
 		} else {
 			host, port, err := net.SplitHostPort(node)
 			if err != nil {
@@ -90,7 +63,7 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
 	conn, err := net.Dial("tcp", node.Address())
 	if err != nil {
-		fmt.Println("Error connecting to mirror:", err)
+		fmt.Println("Error connecting to node:", err)
 		os.Exit(1)
 	}
 
@@ -99,7 +72,7 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 }
 
 func (s *Server) addNode(newNode string) {
-	host, port, err := splitNodeInfo(newNode)
+	host, port, err := net.SplitHostPort(newNode)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -115,8 +88,13 @@ func (s *Server) connectionServer(conn net.Conn) {
 	for {
 		message, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("Connection closed")
-			return
+			if err == io.EOF {
+				fmt.Println("Connection closed by client:", conn.RemoteAddr().String())
+				break
+			} else {
+				fmt.Println("Error reading message:", err)
+				return
+			}
 		}
 
 		headerSplit := strings.Split(message, "!!")
@@ -216,6 +194,9 @@ func main() {
 
 	hostname := os.Args[1]
 	port := os.Args[2]
+	if hostname == "localhost" {
+		hostname = "[::1]"
+	}
 	serverNode := model.Node{Hostname: hostname, Port: port}
 	server := &Server{serverNode, []model.Node{}, []net.Conn{}}
 
