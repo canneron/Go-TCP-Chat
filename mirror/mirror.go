@@ -20,12 +20,6 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 		return
 	}
 
-	// hostname, port, err := net.SplitHostPort(conn.LocalAddr().String())
-	// if err != nil {
-	// 	fmt.Println("Invalid port:", err)
-	// 	return
-	// }
-
 	hostname, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 	hostname = "[" + hostname + "]"
 
