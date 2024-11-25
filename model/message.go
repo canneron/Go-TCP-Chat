@@ -15,6 +15,10 @@ func convertTime(ts time.Time) string {
 	return ts.Format("15:04:05")
 }
 
-func (message Message) ConstructMessage() string {
+func (message Message) ConstructPacket() string {
+	return fmt.Sprintf("%s;;%s;;%s", convertTime(message.Timestamp), message.Nickname, message.Content)
+}
+
+func (message Message) PrintMessage() string {
 	return fmt.Sprintf("%s %s: %s", convertTime(message.Timestamp), message.Nickname, message.Content)
 }

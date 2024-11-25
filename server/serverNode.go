@@ -89,6 +89,14 @@ func (s *Server) addNode(newNode string) {
 	s.connectToNode(node)
 }
 
+func constructMessage(body string) model.Message {
+	msg := strings.Split(body, ";;")
+	layout := "15:04:05"
+	timestampStr := msg[0]
+	parsedTime, _ := time.Parse(layout, timestampStr)
+	return model.Message{Content: msg[2], Nickname: msg[1], Timestamp: parsedTime}
+}
+
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
@@ -129,7 +137,9 @@ func (s *Server) connectionServer(conn net.Conn) {
 		case "NEW":
 			s.addNode(body)
 		default:
-			fmt.Print(body)
+			msg := constructMessage(body)
+			s.messageArchive = append(s.messageArchive, msg)
+			fmt.Print(msg.PrintMessage())
 		}
 	}
 }
@@ -141,7 +151,7 @@ func (s *Server) readInput() {
 		text, _ := reader.ReadString('\n')
 		ts := time.Now()
 		msg := model.Message{Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
-		text = "MSG!!" + msg.ConstructMessage()
+		text = "MSG!!" + msg.ConstructPacket()
 		if text == "EXIT\n" {
 			fmt.Println("Exit command received.")
 			return
@@ -177,7 +187,7 @@ func (server *Server) start() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Listener
+	// ListenerBelfast
 	go func() {
 		defer wg.Done()
 		// Listener start up
