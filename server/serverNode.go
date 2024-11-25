@@ -10,12 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Server struct {
 	thisServer        model.Node
 	knownNodes        []model.Node
 	activeConnections []net.Conn
+	messageArchive    []model.Message
 }
 
 func (s *Server) networkBroadcast() {
@@ -26,8 +28,7 @@ func (s *Server) networkBroadcast() {
 		conn := s.connectToNode(node)
 		fmt.Println("Connected to", conn.RemoteAddr().String())
 
-		nodeInfo := "NEW!!"
-		nodeInfo += s.thisServer.Address()
+		nodeInfo := fmt.Sprintf("NEW!!%s++%s\n", s.thisServer.Address(), s.thisServer.Nickname)
 
 		_, err := conn.Write([]byte(nodeInfo))
 		if err != nil {
@@ -44,16 +45,19 @@ func (s *Server) addNodes(nodeList string) {
 	newNodes := strings.Split(nodeList, "~~")
 	fmt.Println("New Nodes:", nodeList)
 	for _, node := range newNodes {
-		fmt.Println(node + ":" + s.thisServer.Address())
-		if node == s.thisServer.Address() {
+		newNodeInfo := strings.Split(node, "++")
+		if newNodeInfo[0] == s.thisServer.Address() {
+			s.thisServer.Nickname = newNodeInfo[1]
 			continue
 		} else {
-			host, port, err := net.SplitHostPort(node)
+			host, port, err := net.SplitHostPort(newNodeInfo[0])
+			nickname := newNodeInfo[1]
+			host = "[" + host + "]"
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
 			}
-			s.knownNodes = append(s.knownNodes, model.Node{Hostname: host, Port: port})
+			s.knownNodes = append(s.knownNodes, model.Node{Hostname: host, Port: port, Nickname: nickname})
 		}
 	}
 	s.networkBroadcast()
@@ -72,12 +76,15 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 }
 
 func (s *Server) addNode(newNode string) {
-	host, port, err := net.SplitHostPort(newNode)
+	newNodeInfo := strings.Split(newNode, "++")
+	host, port, err := net.SplitHostPort(newNodeInfo[0])
+	nickname := newNodeInfo[1]
+	host = "[" + host + "]"
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	node := model.Node{Hostname: host, Port: port}
+	node := model.Node{Hostname: host, Port: port, Nickname: nickname}
 	s.knownNodes = append(s.knownNodes, node)
 	s.connectToNode(node)
 }
@@ -97,6 +104,8 @@ func (s *Server) connectionServer(conn net.Conn) {
 			}
 		}
 
+		fmt.Println("\nmsg", message)
+
 		headerSplit := strings.Split(message, "!!")
 		if len(headerSplit) < 2 {
 			fmt.Println("Error processing message: ", headerSplit)
@@ -108,16 +117,46 @@ func (s *Server) connectionServer(conn net.Conn) {
 		switch header {
 		case "NODELIST":
 			s.addNodes(body)
+			var input sync.WaitGroup
+			input.Add(1)
+
+			go func() {
+				defer input.Done()
+				s.readInput()
+			}()
+
+			input.Wait()
 		case "NEW":
 			s.addNode(body)
 		default:
-			fmt.Print("Received:", message)
-			conn.Write([]byte("Message Received\n"))
+			fmt.Print(body)
 		}
 	}
 }
 
-func connectToMirror(serverPort string) {
+func (s *Server) readInput() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Enter message: ")
+		text, _ := reader.ReadString('\n')
+		ts := time.Now()
+		msg := model.Message{Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
+		text = "MSG!!" + msg.ConstructMessage()
+		if text == "EXIT\n" {
+			fmt.Println("Exit command received.")
+			return
+		}
+
+		for _, node := range s.activeConnections {
+			fmt.Fprintf(node, text)
+		}
+
+		conn, _ := net.Dial("tcp", s.thisServer.Address())
+		fmt.Fprintf(conn, text)
+	}
+}
+
+func connectToMirror(serverPort string, serverNickname string) {
 	fmt.Println("Connecting to mirror 8080")
 	mirror := "localhost:8080"
 
@@ -130,13 +169,13 @@ func connectToMirror(serverPort string) {
 	defer mirrorConn.Close()
 
 	port, _ := strconv.Atoi(serverPort)
-	fmt.Fprintf(mirrorConn, "%d\n", port)
+	fmt.Fprintf(mirrorConn, "%d++%s\n", port, serverNickname)
 	fmt.Println("Connected to network")
 }
 
 func (server *Server) start() {
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
 	// Listener
 	go func() {
@@ -163,27 +202,16 @@ func (server *Server) start() {
 		}
 	}()
 
-	// Write to server
-	go func() {
-		defer wg.Done()
+	connectToMirror(server.thisServer.Port, server.thisServer.Nickname)
 
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			fmt.Println("Enter message: ")
-			text, _ := reader.ReadString('\n')
-			for _, node := range server.knownNodes {
-				server, err := net.Dial("tcp", node.Address())
-				if err != nil {
-					fmt.Println("Error connecting to server:", node.Address())
-					continue
-				}
-				fmt.Fprintf(server, text)
-			}
-		}
-	}()
-
-	connectToMirror(server.thisServer.Port)
 	wg.Wait()
+}
+
+func chooseName() string {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter nickname: ")
+	text, _ := reader.ReadString('\n')
+	return text
 }
 
 func main() {
@@ -197,8 +225,11 @@ func main() {
 	if hostname == "localhost" {
 		hostname = "[::1]"
 	}
-	serverNode := model.Node{Hostname: hostname, Port: port}
-	server := &Server{serverNode, []model.Node{}, []net.Conn{}}
+
+	nickname := chooseName()
+
+	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname}
+	server := &Server{serverNode, []model.Node{}, []net.Conn{}, []model.Message{}}
 
 	server.start()
 }

@@ -8,6 +8,7 @@ import (
 type Node struct {
 	Hostname string
 	Port     string
+	Nickname string
 }
 
 func (n Node) Address() string {

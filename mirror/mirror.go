@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-func newServer(conn net.Conn, nodes *[]model.Node) {
+func newServer(conn net.Conn, nodes *[]model.Node, nnMap *map[string]int) {
 	defer conn.Close()
 
 	message, err := bufio.NewReader(conn).ReadString('\n')
@@ -20,14 +20,25 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 		return
 	}
 
+	nodeInfo := strings.Split(message, "++")
+	port := nodeInfo[0]
+	nickname := nodeInfo[1]
+
+	if _, ok := (*nnMap)[nickname]; ok {
+		(*nnMap)[nickname]++
+		nickname = fmt.Sprintf("%s (%d)", nickname, (*nnMap)[nickname])
+	} else {
+		(*nnMap)[nickname] = 0
+	}
+
 	hostname, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 	hostname = "[" + hostname + "]"
 
-	newNode := model.Node{Hostname: hostname, Port: message}
+	newNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname}
 	*nodes = append(*nodes, newNode)
 	fmt.Println("New node connected:", newNode)
 
-	address := hostname + ":" + message
+	address := hostname + ":" + port
 
 	newConn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -40,7 +51,7 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 
 	networkConnections := "NODELIST!!"
 	for _, node := range *nodes {
-		networkConnections += fmt.Sprintf("%s:%s~~", node.Hostname, node.Port)
+		networkConnections += fmt.Sprintf("%s:%s++%s~~", node.Hostname, node.Port, node.Nickname)
 	}
 	networkConnections += "\n"
 
@@ -50,7 +61,7 @@ func newServer(conn net.Conn, nodes *[]model.Node) {
 		return
 	}
 
-	fmt.Println("Successfully added node to network\n\n")
+	fmt.Println("Successfully added node to network\n")
 }
 
 func main() {
@@ -76,6 +87,7 @@ func main() {
 
 		fmt.Println("Listening on ", hostname, ":", port)
 		var connectedNodes []model.Node
+		nicknameMap := make(map[string]int)
 		for {
 			conn, err := listener.Accept()
 			fmt.Println("***** Incoming Node! *****")
@@ -84,7 +96,7 @@ func main() {
 				continue
 			}
 
-			go newServer(conn, &connectedNodes)
+			go newServer(conn, &connectedNodes, &nicknameMap)
 		}
 	}()
 
