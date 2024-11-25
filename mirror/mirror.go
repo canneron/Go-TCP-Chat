@@ -26,7 +26,7 @@ func newServer(conn net.Conn, nodes *[]model.Node, nnMap *map[string]int) {
 
 	if _, ok := (*nnMap)[nickname]; ok {
 		(*nnMap)[nickname]++
-		nickname = fmt.Sprintf("%s (%d)", nickname, (*nnMap)[nickname])
+		nickname = fmt.Sprintf("%s(%d)", nickname, (*nnMap)[nickname])
 	} else {
 		(*nnMap)[nickname] = 0
 	}
