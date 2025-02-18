@@ -1,104 +1,56 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"go-p2p/model"
-	"net"
-	"os"
-	"strings"
-	"sync"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-func newServer(conn net.Conn, nodes *[]model.Node, nnMap *map[string]int) {
-	defer conn.Close()
+func newServer(nodes *[]model.Node) model.DiscoverMessage {
 
-	message, err := bufio.NewReader(conn).ReadString('\n')
-	message = strings.TrimSpace(message)
-	if err != nil {
-		fmt.Println("Error reading message:", err)
-		return
-	}
+	fmt.Println("Sending connection list")
 
-	nodeInfo := strings.Split(message, "++")
-	port := nodeInfo[0]
-	nickname := nodeInfo[1]
+	msg := model.DiscoverMessage{NodeList: *nodes, Timestamp: time.Now()}
 
-	if _, ok := (*nnMap)[nickname]; ok {
+	return msg
+}
+
+func addServer(incomingNode model.Node, nodes *[]model.Node, nnMap *map[string]int) {
+	nickname := incomingNode.Nickname
+
+	if _, ok := (*nnMap)[incomingNode.Nickname]; ok {
 		(*nnMap)[nickname]++
 		nickname = fmt.Sprintf("%s(%d)", nickname, (*nnMap)[nickname])
 	} else {
 		(*nnMap)[nickname] = 0
 	}
 
-	hostname, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-	hostname = "[" + hostname + "]"
+	hostname := "[" + incomingNode.Hostname + "]"
 
-	newNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname}
+	newNode := model.Node{Hostname: hostname, Port: incomingNode.Port, Nickname: nickname}
 	*nodes = append(*nodes, newNode)
 	fmt.Println("New node connected:", newNode)
-
-	address := hostname + ":" + port
-
-	newConn, err := net.Dial("tcp", address)
-	if err != nil {
-		fmt.Println("Error connecting to server:", err)
-		os.Exit(1)
-	}
-
-	defer newConn.Close()
-	fmt.Println("Sending connection list to", newNode.Address())
-
-	networkConnections := "NODELIST!!"
-	for _, node := range *nodes {
-		networkConnections += fmt.Sprintf("%s:%s++%s~~", node.Hostname, node.Port, node.Nickname)
-	}
-	networkConnections += "\n"
-
-	_, err = newConn.Write([]byte(networkConnections))
-	if err != nil {
-		fmt.Println("Error sending message:", err)
-		return
-	}
-
-	fmt.Println("Successfully added node to network\n")
 }
 
 func main() {
 	fmt.Println("Starting mirror...")
 
-	hostname := "localhost"
-	port := "8080"
+	r := gin.Default()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var connectedNodes []model.Node
+	nicknameMap := make(map[string]int)
 
-	go func() {
-		defer wg.Done()
-
-		portLN := ":" + port
-		listener, err := net.Listen("tcp", portLN)
-		if err != nil {
-			fmt.Println("Error starting TCP:", err)
-			os.Exit(1)
+	r.POST("/getNodes", func(c *gin.Context) {
+		var node model.Node
+		if err := c.BindJSON(&node); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
-		defer listener.Close()
-
-		fmt.Println("Listening on ", hostname, ":", port)
-		var connectedNodes []model.Node
-		nicknameMap := make(map[string]int)
-		for {
-			conn, err := listener.Accept()
-			fmt.Println("***** Incoming Node! *****")
-			if err != nil {
-				fmt.Println("Error accepting connection:", err)
-				continue
-			}
-
-			go newServer(conn, &connectedNodes, &nicknameMap)
-		}
-	}()
-
-	wg.Wait()
+		addServer(node, &connectedNodes, &nicknameMap)
+		c.JSON(http.StatusOK, newServer(&connectedNodes))
+	})
 }
