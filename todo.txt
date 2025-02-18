@@ -1,0 +1,13 @@
+IMMEDIATE
+- Channels
+- Order Messages by timestamp
+- Send new clients message history
+- Basic UI
+
+EVENTUAL
+- Send files/images
+- Voice chat
+- Server Roles/Persistent Profiles
+- Start more than one server
+- Fine grained settings for channels
+- More advanced UI
