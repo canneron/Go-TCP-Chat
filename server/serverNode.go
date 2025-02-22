@@ -56,6 +56,7 @@ func (s *Server) addNodes(nodelist []model.Node) {
 
 func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
+
 	conn, err := net.Dial("tcp", node.Address())
 	if err != nil {
 		fmt.Println("Error connecting to node:", err)
@@ -67,6 +68,7 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 }
 
 func (s *Server) addNode(host string, port string, nickname string) {
+	fmt.Println("node: {} {} {}", host, port, nickname)
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname}
 	s.knownNodes = append(s.knownNodes, node)
 	s.connectToNode(node)
@@ -74,9 +76,11 @@ func (s *Server) addNode(host string, port string, nickname string) {
 
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
-	reader := bufio.NewReader(conn)
+	decoder := json.NewDecoder(conn)
+
 	for {
-		message, err := reader.ReadString('\n')
+		var incomingMsg model.Message
+		err := decoder.Decode(&incomingMsg)
 		if err != nil {
 			if err == io.EOF {
 				fmt.Println("Connection closed by client:", conn.RemoteAddr().String())
@@ -87,21 +91,15 @@ func (s *Server) connectionServer(conn net.Conn) {
 			}
 		}
 
-		fmt.Println("\n", message)
-
-		var msg model.Message
-		if err := json.Unmarshal([]byte(message), &msg); err != nil {
-			fmt.Println("Error decoding JSON:", err)
-			return
-		}
-		header := msg.Type
+		fmt.Println("\nincoming!")
+		header := incomingMsg.Type
 
 		switch header {
 		case "NEW":
-			s.addNode(msg.Hostname, msg.Port, msg.Nickname)
+			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		default:
-			s.messageArchive = append(s.messageArchive, msg)
-			fmt.Print(msg.PrintMessage())
+			s.messageArchive = append(s.messageArchive, incomingMsg)
+			fmt.Print(incomingMsg.PrintMessage())
 		}
 	}
 }
@@ -126,7 +124,10 @@ func (s *Server) readInput() {
 			continue
 		}
 
+		fmt.Println(s.activeConnections)
 		for _, node := range s.activeConnections {
+			fmt.Println("test")
+
 			node.Write(jsonData)
 		}
 
@@ -155,11 +156,7 @@ func (s *Server) connectToMirror() {
 
 		s.addNodes(msg.NodeList)
 
-		var result map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&result)
-
-		// Print the response
-		fmt.Println("Response from server:", result)
+		fmt.Println("Response from server:", msg)
 		fmt.Println("Connected to network")
 
 		var input sync.WaitGroup

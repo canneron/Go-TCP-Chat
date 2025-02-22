@@ -11,7 +11,7 @@ import (
 
 func newServer(nodes *[]model.Node) model.DiscoverMessage {
 
-	fmt.Println("Sending connection list")
+	fmt.Println("Sending connection list: ", *nodes)
 
 	msg := model.DiscoverMessage{NodeList: *nodes, Timestamp: time.Now()}
 
@@ -28,9 +28,7 @@ func addServer(incomingNode model.Node, nodes *[]model.Node, nnMap *map[string]i
 		(*nnMap)[nickname] = 0
 	}
 
-	hostname := "[" + incomingNode.Hostname + "]"
-
-	newNode := model.Node{Hostname: hostname, Port: incomingNode.Port, Nickname: nickname}
+	newNode := model.Node{Hostname: incomingNode.Hostname, Port: incomingNode.Port, Nickname: nickname}
 	*nodes = append(*nodes, newNode)
 	fmt.Println("New node connected:", newNode)
 }
@@ -53,4 +51,8 @@ func main() {
 		addServer(node, &connectedNodes, &nicknameMap)
 		c.JSON(http.StatusOK, newServer(&connectedNodes))
 	})
+
+	r.Run(":8080")
+
+	fmt.Println("Stopping")
 }

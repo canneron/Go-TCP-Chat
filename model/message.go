@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,7 +21,8 @@ func convertTime(ts time.Time) string {
 }
 
 func (message Message) PrintMessage() string {
-	return fmt.Sprintf("%s %s: %s", convertTime(message.Timestamp), message.Nickname, message.Content)
+	cleanNN := strings.ReplaceAll(message.Nickname, "\n", "")
+	return fmt.Sprintf("%s %s: %s", convertTime(message.Timestamp), cleanNN, message.Content)
 }
 
 func (message Message) ConstructPacket() string {
