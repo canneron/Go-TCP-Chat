@@ -21,6 +21,7 @@ type Server struct {
 	knownMirrors      []model.Node
 	activeConnections []net.Conn
 	messageArchive    []model.Message
+	channels          []Channel
 }
 
 func (s *Server) networkBroadcast() {
@@ -91,7 +92,6 @@ func (s *Server) connectionServer(conn net.Conn) {
 			}
 		}
 
-		fmt.Println("\nincoming!")
 		header := incomingMsg.Type
 
 		switch header {
@@ -126,8 +126,6 @@ func (s *Server) readInput() {
 
 		fmt.Println(s.activeConnections)
 		for _, node := range s.activeConnections {
-			fmt.Println("test")
-
 			node.Write(jsonData)
 		}
 
@@ -252,9 +250,10 @@ func main() {
 	}
 
 	nickname := chooseName()
+	defaultChannel := model.NewChannel("default")
 
-	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname}
-	server := &Server{serverNode, []model.Node{}, []model.Node{}, []net.Conn{}, []model.Message{}}
+	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
+	server := &Server{serverNode, []model.Node{}, []model.Node{}, []net.Conn{}, []model.Message{}, []model.Channel{defaultChannel}}
 
 	server.start()
 }

@@ -1,7 +1,12 @@
 IMMEDIATE
 - Channels
-- Order Messages by timestamp
+    -> Default channel when they connect
+    -> List of channels must be sent around and broadcast
+    -> Each user must be able to know about other users in other channels but chat should only be able to be between nodes in channel
+- Remove servers when they exit
+- Order messages by timestamp
 - Send new clients message history
+- Private messaging
 - Basic UI
 
 EVENTUAL
