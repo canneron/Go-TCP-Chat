@@ -5,19 +5,19 @@ import (
 )
 
 type Channel struct {
-	connectedNodes []Node
-	connections    []net.Conn
-	chatHistory    []Message
-	channelName    string
-	connLimit      int
+	ConnectedNodes []Node
+	Connections    []net.Conn
+	ChatHistory    []Message
+	ChannelName    string
+	ConnLimit      int
 }
 
 func NewChannel(name string) Channel {
 	return Channel{
-		connectedNodes: []Node{},
-		connections:    []net.Conn{},
-		chatHistory:    []Message{},
-		channelName:    name,
-		connLimit:      100,
+		ConnectedNodes: []Node{},
+		Connections:    []net.Conn{},
+		ChatHistory:    []Message{},
+		ChannelName:    name,
+		ConnLimit:      100,
 	}
 }

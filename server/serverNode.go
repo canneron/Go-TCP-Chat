@@ -21,12 +21,14 @@ type Server struct {
 	knownMirrors      []model.Node
 	activeConnections []net.Conn
 	messageArchive    []model.Message
-	channels          []Channel
+	channels          []model.Channel
 }
+
+var defaultChannel = model.NewChannel("default")
 
 func (s *Server) networkBroadcast() {
 	for _, node := range s.knownNodes {
-		if node == s.thisServer {
+		if node.Hostname == s.thisServer.Hostname && node.Port == s.thisServer.Port {
 			continue
 		}
 		conn := s.connectToNode(node)
@@ -70,7 +72,7 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 
 func (s *Server) addNode(host string, port string, nickname string) {
 	fmt.Println("node: {} {} {}", host, port, nickname)
-	node := model.Node{Hostname: host, Port: port, Nickname: nickname}
+	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
 	s.knownNodes = append(s.knownNodes, node)
 	s.connectToNode(node)
 }
@@ -97,6 +99,8 @@ func (s *Server) connectionServer(conn net.Conn) {
 		switch header {
 		case "NEW":
 			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+		case "NEW CHANNEL":
+
 		default:
 			s.messageArchive = append(s.messageArchive, incomingMsg)
 			fmt.Print(incomingMsg.PrintMessage())
@@ -104,7 +108,16 @@ func (s *Server) connectionServer(conn net.Conn) {
 	}
 }
 
-func (s *Server) readInput() {
+func (s *Server) updateChannelList(channel string, hostname string, port string) {
+	for _, node := range s.knownNodes {
+		if node.Hostname == hostname && node.Port == port {
+			node.Channel = model.NewChannel(channel)
+		}
+	}
+
+}
+
+func (s *Server) sendMessage() {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("Enter message: ")
@@ -125,7 +138,7 @@ func (s *Server) readInput() {
 		}
 
 		fmt.Println(s.activeConnections)
-		for _, node := range s.activeConnections {
+		for _, node := range s.thisServer.Channel.ConnectedNodes {
 			node.Write(jsonData)
 		}
 
@@ -162,7 +175,7 @@ func (s *Server) connectToMirror() {
 
 		go func() {
 			defer input.Done()
-			s.readInput()
+			s.sendMessage()
 		}()
 
 		input.Wait()
@@ -194,6 +207,26 @@ func (s *Server) loadMirrors() {
 	if err := scanner.Err(); err != nil {
 		fmt.Println("Error reading mirrorlist.txt:", err)
 	}
+}
+
+// User Functions
+
+func (server *Server) CreateChannel(name string) {
+	server.thisServer.Channel = model.NewChannel(name)
+	msg := model.Message{Type: "NEW CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Timestamp: time.Now()}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Println("Error encoding JSON:", err)
+	}
+
+	fmt.Println(server.activeConnections)
+	for _, node := range server.activeConnections {
+		node.Write(jsonData)
+	}
+
+	conn, _ := net.Dial("tcp", server.thisServer.Address())
+	conn.Write(jsonData)
 }
 
 func (server *Server) start() {
@@ -250,7 +283,6 @@ func main() {
 	}
 
 	nickname := chooseName()
-	defaultChannel := model.NewChannel("default")
 
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
 	server := &Server{serverNode, []model.Node{}, []model.Node{}, []net.Conn{}, []model.Message{}, []model.Channel{defaultChannel}}
