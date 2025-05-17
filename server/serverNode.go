@@ -17,12 +17,16 @@ import (
 
 type Server struct {
 	thisServer   model.Node
-	knownNodes   map[*model.Node]net.Conn
+	knownNodes   map[string]*model.Node
 	knownMirrors []model.Node
-	channels     []model.Channel
+	channels     map[string]*model.Channel
 }
 
-var defaultChannel = model.NewChannel("lobby")
+var defaultChannelName = "lobby"
+var defaultChannel = model.NewChannel(defaultChannelName)
+var defaultChans = map[string]*model.Channel{
+	defaultChannelName: &defaultChannel,
+}
 
 func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
@@ -33,7 +37,8 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 		os.Exit(1)
 	}
 
-	s.knownNodes[&node] = conn
+	node.Connection = conn
+	s.knownNodes[node.Address()] = &node
 	return conn
 }
 
@@ -41,10 +46,8 @@ func (s *Server) addNode(host string, port string, nickname string) {
 	fmt.Println("node: {} {} {}", host, port, nickname)
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
 
-	for existingNode, _ := range s.knownNodes {
-		if existingNode.Address() == node.Address() {
-			return
-		}
+	if _, exists := s.knownNodes[node.Address()]; exists {
+		return
 	}
 
 	s.connectToNode(node)
@@ -73,50 +76,11 @@ func (s *Server) connectionServer(conn net.Conn) {
 		case "NEW":
 			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		case "NEW CHANNEL":
-			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port)
+			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		default:
 			s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 			fmt.Print(incomingMsg.PrintMessage())
 		}
-	}
-}
-
-func (s *Server) updateChannelList(channel string, hostname string, port string) {
-	for node := range s.knownNodes {
-		if node.Hostname == hostname && node.Port == port {
-			node.Channel = model.NewChannel(channel)
-		}
-	}
-
-}
-
-func (s *Server) sendMessage() {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print("Enter message: ")
-		text, _ := reader.ReadString('\n')
-		ts := time.Now()
-
-		msg := model.Message{Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
-
-		if text == "EXIT\n" {
-			fmt.Println("Exit command received.")
-			return
-		}
-
-		jsonData, err := json.Marshal(msg)
-		if err != nil {
-			fmt.Println("Error encoding JSON:", err)
-			continue
-		}
-
-		for _, node := range s.thisServer.Channel.ConnectedNodes {
-			chanConn := s.knownNodes[&node]
-			chanConn.Write(jsonData)
-		}
-
-		conn, _ := net.Dial("tcp", s.thisServer.Address())
-		conn.Write(jsonData)
 	}
 }
 
@@ -126,6 +90,7 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 			continue
 		}
 		conn := s.connectToNode(node)
+		node.Connection = conn
 		fmt.Println("Connected to", conn.RemoteAddr().String())
 
 		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
@@ -173,7 +138,7 @@ func (s *Server) connectToMirror() {
 
 		go func() {
 			defer input.Done()
-			s.sendMessage()
+			s.sendMessageToChannel()
 		}()
 
 		input.Wait()
@@ -207,11 +172,55 @@ func (s *Server) loadMirrors() {
 	}
 }
 
-// User Functions
+// Channel Functions
+
+func (s *Server) updateChannelList(channel string, hostname string, nickname string, port string) {
+	address := hostname + ":" + port
+	if node, exists := s.knownNodes[address]; exists {
+		node.Channel = model.NewChannel(channel)
+
+		if channel == s.thisServer.Channel.ChannelName {
+			s.thisServer.Channel.ConnectedNodes[address] = *node
+		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
+			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
+			fmt.Println(nickname + " has left the channel.")
+		}
+	}
+}
+
+func (s *Server) sendMessageToChannel() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Enter message: ")
+		text, _ := reader.ReadString('\n')
+		ts := time.Now()
+
+		msg := model.Message{Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
+
+		if text == "EXIT\n" {
+			fmt.Println("Exit command received.")
+			return
+		}
+
+		jsonData, err := json.Marshal(msg)
+		if err != nil {
+			fmt.Println("Error encoding JSON:", err)
+			continue
+		}
+
+		for _, node := range s.thisServer.Channel.ConnectedNodes {
+			node.Connection.Write(jsonData)
+		}
+
+		conn, _ := net.Dial("tcp", s.thisServer.Address())
+		conn.Write(jsonData)
+	}
+}
 
 func (server *Server) CreateChannel(name string) {
+
 	server.thisServer.Channel = model.NewChannel(name)
-	msg := model.Message{Type: "NEW CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Timestamp: time.Now()}
+	msg := model.Message{Type: "NEW CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -219,7 +228,7 @@ func (server *Server) CreateChannel(name string) {
 	}
 
 	for _, node := range server.knownNodes {
-		node.Write(jsonData)
+		node.Connection.Write(jsonData)
 	}
 
 	conn, _ := net.Dial("tcp", server.thisServer.Address())
@@ -282,7 +291,8 @@ func main() {
 	nickname := chooseName()
 
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
-	server := &Server{serverNode, make(map[*model.Node]net.Conn), []model.Node{}, []model.Channel{defaultChannel}}
+
+	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans}
 
 	server.start()
 }

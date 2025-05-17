@@ -3,14 +3,16 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 )
 
 type Node struct {
-	Hostname string  `json:"hostname"`
-	Port     string  `json:"port"`
-	Nickname string  `json:"nickname"`
-	Channel  Channel `json:"channel"`
+	Hostname   string   `json:"hostname"`
+	Port       string   `json:"port"`
+	Nickname   string   `json:"nickname"`
+	Connection net.Conn `json:"-"`
+	Channel    Channel  `json:"channel"`
 }
 
 func (n Node) Address() string {
