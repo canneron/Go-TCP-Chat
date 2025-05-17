@@ -16,46 +16,13 @@ import (
 )
 
 type Server struct {
-	thisServer        model.Node
-	knownNodes        []model.Node
-	knownMirrors      []model.Node
-	activeConnections []net.Conn
-	messageArchive    []model.Message
-	channels          []model.Channel
+	thisServer   model.Node
+	knownNodes   map[*model.Node]net.Conn
+	knownMirrors []model.Node
+	channels     []model.Channel
 }
 
-var defaultChannel = model.NewChannel("default")
-
-func (s *Server) networkBroadcast() {
-	for _, node := range s.knownNodes {
-		if node.Hostname == s.thisServer.Hostname && node.Port == s.thisServer.Port {
-			continue
-		}
-		conn := s.connectToNode(node)
-		fmt.Println("Connected to", conn.RemoteAddr().String())
-
-		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
-
-		jsonData, err := json.Marshal(nodeInfo)
-		if err != nil {
-			fmt.Println("Error encoding JSON:", err)
-			continue
-		}
-
-		_, err = conn.Write(jsonData)
-		if err != nil {
-			fmt.Println("Error sending message:", err)
-			return
-		}
-		fmt.Println("Node information sent")
-	}
-}
-
-func (s *Server) addNodes(nodelist []model.Node) {
-	s.knownNodes = append(s.knownNodes, nodelist...)
-
-	s.networkBroadcast()
-}
+var defaultChannel = model.NewChannel("lobby")
 
 func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
@@ -66,14 +33,20 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 		os.Exit(1)
 	}
 
-	s.activeConnections = append(s.activeConnections, conn)
+	s.knownNodes[&node] = conn
 	return conn
 }
 
 func (s *Server) addNode(host string, port string, nickname string) {
 	fmt.Println("node: {} {} {}", host, port, nickname)
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
-	s.knownNodes = append(s.knownNodes, node)
+
+	for existingNode, _ := range s.knownNodes {
+		if existingNode.Address() == node.Address() {
+			return
+		}
+	}
+
 	s.connectToNode(node)
 }
 
@@ -100,16 +73,16 @@ func (s *Server) connectionServer(conn net.Conn) {
 		case "NEW":
 			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		case "NEW CHANNEL":
-
+			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port)
 		default:
-			s.messageArchive = append(s.messageArchive, incomingMsg)
+			s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 			fmt.Print(incomingMsg.PrintMessage())
 		}
 	}
 }
 
 func (s *Server) updateChannelList(channel string, hostname string, port string) {
-	for _, node := range s.knownNodes {
+	for node := range s.knownNodes {
 		if node.Hostname == hostname && node.Port == port {
 			node.Channel = model.NewChannel(channel)
 		}
@@ -137,13 +110,38 @@ func (s *Server) sendMessage() {
 			continue
 		}
 
-		fmt.Println(s.activeConnections)
 		for _, node := range s.thisServer.Channel.ConnectedNodes {
-			node.Write(jsonData)
+			chanConn := s.knownNodes[&node]
+			chanConn.Write(jsonData)
 		}
 
 		conn, _ := net.Dial("tcp", s.thisServer.Address())
 		conn.Write(jsonData)
+	}
+}
+
+func (s *Server) networkBroadcast(nodeList []model.Node) {
+	for _, node := range nodeList {
+		if node.Hostname == s.thisServer.Hostname && node.Port == s.thisServer.Port {
+			continue
+		}
+		conn := s.connectToNode(node)
+		fmt.Println("Connected to", conn.RemoteAddr().String())
+
+		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
+
+		jsonData, err := json.Marshal(nodeInfo)
+		if err != nil {
+			fmt.Println("Error encoding JSON:", err)
+			continue
+		}
+
+		_, err = conn.Write(jsonData)
+		if err != nil {
+			fmt.Println("Error sending message:", err)
+			return
+		}
+		fmt.Println("Node information sent")
 	}
 }
 
@@ -165,7 +163,7 @@ func (s *Server) connectToMirror() {
 			return
 		}
 
-		s.addNodes(msg.NodeList)
+		s.networkBroadcast(msg.NodeList)
 
 		fmt.Println("Response from server:", msg)
 		fmt.Println("Connected to network")
@@ -220,8 +218,7 @@ func (server *Server) CreateChannel(name string) {
 		fmt.Println("Error encoding JSON:", err)
 	}
 
-	fmt.Println(server.activeConnections)
-	for _, node := range server.activeConnections {
+	for _, node := range server.knownNodes {
 		node.Write(jsonData)
 	}
 
@@ -285,7 +282,7 @@ func main() {
 	nickname := chooseName()
 
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
-	server := &Server{serverNode, []model.Node{}, []model.Node{}, []net.Conn{}, []model.Message{}, []model.Channel{defaultChannel}}
+	server := &Server{serverNode, make(map[*model.Node]net.Conn), []model.Node{}, []model.Channel{defaultChannel}}
 
 	server.start()
 }
