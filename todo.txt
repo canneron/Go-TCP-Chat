@@ -1,9 +1,7 @@
 IMMEDIATE
 - Channels
-    -> Default channel when they connect
-    NB Active Connections needs overhauled so that they're stored in a map
     -> List of channels must be sent around and broadcast
-    -> Each user must be able to know about other users in other channels but chat should only be able to be between nodes in channel
+    HANDLING SENDING CHANNEL INFO ON CONNECTION TO OTHER NODES
 - Remove servers when they exit
 - Order messages by timestamp
 - Send new clients message history
