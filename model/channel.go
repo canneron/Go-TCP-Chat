@@ -3,10 +3,10 @@ package model
 import "fmt"
 
 type Channel struct {
-	ConnectedNodes map[string]Node
-	ChatHistory    []Message
-	ChannelName    string
-	ConnLimit      int
+	ConnectedNodes map[string]Node `json:"connectedNodes"`
+	ChatHistory    []Message       `json:"chatHistory"`
+	ChannelName    string          `json:"channelName"`
+	ConnLimit      int             `json:"-"`
 }
 
 func NewChannel(name string) Channel {

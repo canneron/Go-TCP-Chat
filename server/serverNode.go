@@ -53,6 +53,16 @@ func (s *Server) addNode(host string, port string, nickname string) {
 	s.connectToNode(node)
 }
 
+func (s *Server) handleChannel(channelList []model.Channel) {
+	for _, chanName := range channelList {
+		if _, exists := s.channels[chanName.ChannelName]; exists {
+			continue
+		} else {
+			s.channels[chanName.ChannelName] = &chanName
+		}
+	}
+}
+
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
@@ -74,8 +84,17 @@ func (s *Server) connectionServer(conn net.Conn) {
 
 		switch header {
 		case "NEW":
+			var incomingChannel []model.Channel
+			if err := json.Unmarshal([]byte(incomingMsg.Content), &incomingChannel); err != nil {
+				fmt.Println("Error unmarshaling Content into Channel:", err)
+				return
+			}
+
+			s.handleChannel(incomingChannel)
 			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		case "NEW CHANNEL":
+			s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+		case "UPDATE CHANNEL":
 			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		default:
 			s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
@@ -92,8 +111,15 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 		conn := s.connectToNode(node)
 		node.Connection = conn
 		fmt.Println("Connected to", conn.RemoteAddr().String())
+	
+		channelListJSON, err1 := json.Marshal(s.thisServer.channels)
 
-		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
+		if err1 != nil {
+			fmt.Println("Error encoding channel JSON:", err1)
+			continue
+		}
+
+		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now(), Content: string(channelListJSON)}
 
 		jsonData, err := json.Marshal(nodeInfo)
 		if err != nil {
@@ -174,10 +200,39 @@ func (s *Server) loadMirrors() {
 
 // Channel Functions
 
-func (s *Server) updateChannelList(channel string, hostname string, nickname string, port string) {
+func (s *Server) updateNewChannel(channel string, hostname string, nickname string, port string) {
 	address := hostname + ":" + port
 	if node, exists := s.knownNodes[address]; exists {
 		node.Channel = model.NewChannel(channel)
+
+		if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
+			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
+			fmt.Println(nickname + " has left the channel.")
+		}
+	}
+
+	if newChannel, exists := s.channels[channel]; !exists {
+		s.channels[channel] = model.NewChannel(channel)
+	}
+}
+
+func (s *Server) updateChannelList(channel string, hostname string, nickname string, port string) {
+	address := hostname + ":" + port
+	if node, exists := s.knownNodes[address]; exists {
+		if existingChan, exists := s.channels[node.Channel.ChannelName]; exists {
+			if existingChan.
+			if _, exists := existingChan.ConnectedNodes[address]; exists {
+				delete(existingChan.ConnectedNodes, node.Address())
+			}
+		} else {
+			fmt.Println("Channel not found:", node.Channel.ChannelName)	
+		}
+
+		if newChannel, exists := s.channels[channel]; exists {
+			newChannel.ConnectedNodes[node.Address()] = *node
+		} else {
+			fmt.Println("Channel not found:", channel)		
+		}
 
 		if channel == s.thisServer.Channel.ChannelName {
 			s.thisServer.Channel.ConnectedNodes[address] = *node

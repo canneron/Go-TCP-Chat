@@ -1,7 +1,4 @@
 IMMEDIATE
-- Channels
-    -> List of channels must be sent around and broadcast
-    HANDLING SENDING CHANNEL INFO ON CONNECTION TO OTHER NODES
 - Remove servers when they exit
 - Order messages by timestamp
 - Send new clients message history
