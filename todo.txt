@@ -1,6 +1,5 @@
 IMMEDIATE
 - Remove servers when they exit
-- Order messages by timestamp
 - Send new clients message history
 - Private messaging
 - Basic UI

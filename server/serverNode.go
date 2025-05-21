@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -198,8 +199,13 @@ func (s *Server) loadMirrors() {
 	}
 }
 
-// Channel Functions
+func (s *Server) orderMessages() {
+	sort.Slice(s.thisServer.Channel.ChatHistory, func(i, j time.Time) bool {
+		return s.thisServer.Channel.ChatHistory[i].Timestamp.After(s.thisServer.Channel.ChatHistory[j])
+	})
+}
 
+// Channel Functions
 func (s *Server) updateNewChannel(channel string, hostname string, nickname string, port string) {
 	address := hostname + ":" + port
 	if node, exists := s.knownNodes[address]; exists {
@@ -288,6 +294,10 @@ func (server *Server) CreateChannel(name string) {
 
 	conn, _ := net.Dial("tcp", server.thisServer.Address())
 	conn.Write(jsonData)
+}
+
+func (server *Server) orderMessages() {
+
 }
 
 func (server *Server) start() {
