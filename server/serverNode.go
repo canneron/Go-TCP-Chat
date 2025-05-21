@@ -113,8 +113,8 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 		conn := s.connectToNode(node)
 		node.Connection = conn
 		fmt.Println("Connected to", conn.RemoteAddr().String())
-	
-		channelListJSON, err1 := json.Marshal(s.thisServer.channels)
+
+		channelListJSON, err1 := json.Marshal(s.channels)
 
 		if err1 != nil {
 			fmt.Println("Error encoding channel JSON:", err1)
@@ -212,8 +212,9 @@ func (s *Server) updateNewChannel(channel string, hostname string, nickname stri
 		}
 	}
 
-	if newChannel, exists := s.channels[channel]; !exists {
-		s.channels[channel] = model.NewChannel(channel)
+	if _, exists := s.channels[channel]; !exists {
+		newChannel := model.NewChannel(channel)
+		s.channels[channel] = &newChannel
 	}
 }
 
@@ -221,27 +222,26 @@ func (s *Server) updateChannelList(channel string, hostname string, nickname str
 	address := hostname + ":" + port
 	if node, exists := s.knownNodes[address]; exists {
 		if existingChan, exists := s.channels[node.Channel.ChannelName]; exists {
-			if existingChan.
 			if _, exists := existingChan.ConnectedNodes[address]; exists {
 				delete(existingChan.ConnectedNodes, node.Address())
 			}
 		} else {
-			fmt.Println("Channel not found:", node.Channel.ChannelName)	
+			fmt.Println("Channel not found:", node.Channel.ChannelName)
 		}
 
 		if newChannel, exists := s.channels[channel]; exists {
 			newChannel.ConnectedNodes[node.Address()] = *node
 		} else {
-			fmt.Println("Channel not found:", channel)		
+			fmt.Println("Channel not found:", channel)
 		}
 
 		if channel == s.thisServer.Channel.ChannelName {
 			s.thisServer.Channel.ConnectedNodes[address] = *node
 			fmt.Println(nickname + " has joined the channel.")
 
-			channelInfo, err := json.Marshal(s.thisServer.Channel)
-			msg := model.Message{Type: "CHANNEL INFO", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channelInfo, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
-
+			channelInfo, _ := json.Marshal(s.thisServer.Channel)
+			msg := model.Message{Type: "CHANNEL INFO", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
+			jsonData, _ := json.Marshal(msg)
 			node.Connection.Write(jsonData)
 		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
@@ -257,10 +257,10 @@ func (s *Server) joinChannel(channel string) {
 		return
 	}
 
-	if (channel != s.thisServer.Channel.ChannelName) {
+	if channel != s.thisServer.Channel.ChannelName {
 		s.thisServer.Channel = incomingChannel
 		s.thisServer.Channel.OrderMessages()
-		fmt.Println(nickname + " has joined the channel.")
+		fmt.Println(s.thisServer.Nickname + " has joined the channel.")
 	}
 }
 
@@ -311,8 +311,8 @@ func (server *Server) CreateChannel(name string) {
 }
 
 func (server *Server) ChangeChannel(channel string) {
-	server.thisServer.Channel = model.NewChannel(name)
-	msg := model.Message{Type: "UPDATE CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+	server.thisServer.Channel = model.NewChannel(channel)
+	msg := model.Message{Type: "UPDATE CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channel, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
