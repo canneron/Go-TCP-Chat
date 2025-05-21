@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +96,8 @@ func (s *Server) connectionServer(conn net.Conn) {
 			s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 		case "UPDATE CHANNEL":
 			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+		case "CHANNEL INFO":
+			s.joinChannel(incomingMsg.Content)
 		default:
 			s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 			fmt.Print(incomingMsg.PrintMessage())
@@ -199,12 +200,6 @@ func (s *Server) loadMirrors() {
 	}
 }
 
-func (s *Server) orderMessages() {
-	sort.Slice(s.thisServer.Channel.ChatHistory, func(i, j time.Time) bool {
-		return s.thisServer.Channel.ChatHistory[i].Timestamp.After(s.thisServer.Channel.ChatHistory[j])
-	})
-}
-
 // Channel Functions
 func (s *Server) updateNewChannel(channel string, hostname string, nickname string, port string) {
 	address := hostname + ":" + port
@@ -242,10 +237,30 @@ func (s *Server) updateChannelList(channel string, hostname string, nickname str
 
 		if channel == s.thisServer.Channel.ChannelName {
 			s.thisServer.Channel.ConnectedNodes[address] = *node
+			fmt.Println(nickname + " has joined the channel.")
+
+			channelInfo, err := json.Marshal(s.thisServer.Channel)
+			msg := model.Message{Type: "CHANNEL INFO", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channelInfo, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+
+			node.Connection.Write(jsonData)
 		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
 			fmt.Println(nickname + " has left the channel.")
 		}
+	}
+}
+
+func (s *Server) joinChannel(channel string) {
+	var incomingChannel model.Channel
+	if err := json.Unmarshal([]byte(channel), &incomingChannel); err != nil {
+		fmt.Println("Error unmarshaling Content into Channel:", err)
+		return
+	}
+
+	if (channel != s.thisServer.Channel.ChannelName) {
+		s.thisServer.Channel = incomingChannel
+		s.thisServer.Channel.OrderMessages()
+		fmt.Println(nickname + " has joined the channel.")
 	}
 }
 
@@ -279,7 +294,6 @@ func (s *Server) sendMessageToChannel() {
 }
 
 func (server *Server) CreateChannel(name string) {
-
 	server.thisServer.Channel = model.NewChannel(name)
 	msg := model.Message{Type: "NEW CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
 
@@ -294,6 +308,20 @@ func (server *Server) CreateChannel(name string) {
 
 	conn, _ := net.Dial("tcp", server.thisServer.Address())
 	conn.Write(jsonData)
+}
+
+func (server *Server) ChangeChannel(channel string) {
+	server.thisServer.Channel = model.NewChannel(name)
+	msg := model.Message{Type: "UPDATE CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Println("Error encoding JSON:", err)
+	}
+
+	for _, node := range server.knownNodes {
+		node.Connection.Write(jsonData)
+	}
 }
 
 func (server *Server) orderMessages() {

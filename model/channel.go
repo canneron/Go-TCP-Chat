@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 type Channel struct {
 	ConnectedNodes map[string]Node `json:"connectedNodes"`
@@ -29,4 +32,10 @@ func (c *Channel) PrintHistory() {
 	for _, msg := range c.ChatHistory {
 		fmt.Println(msg.PrintMessage())
 	}
+}
+
+func (c *Channel) OrderMessages() {
+	sort.Slice(c.ChatHistory, func(i, j int) bool {
+		return c.ChatHistory[i].Timestamp.After(c.ChatHistory[j].Timestamp)
+	})
 }
