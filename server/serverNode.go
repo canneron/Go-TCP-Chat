@@ -85,6 +85,9 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 		s.joinChannel(incomingMsg.Content)
 	case "PM":
 		s.privateMessageHistory[incomingMsg.Nickname] = append(s.privateMessageHistory[incomingMsg.Nickname], incomingMsg)
+	case "EXIT":
+		address := fmt.Sprintf("%s:%s", incomingMsg.Hostname, incomingMsg.Port)
+		s.removeNode(address)
 	default:
 		s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 		fmt.Print(incomingMsg.PrintMessage())
@@ -180,6 +183,25 @@ func (s *Server) connectToMirror() {
 	}
 }
 
+func (s *Server) exit() {
+	ts := time.Now()
+
+	msg := model.Message{Type: "EXIT", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Println("Error encoding JSON:", err)
+		return
+	}
+
+	for _, node := range s.knownNodes {
+		node.Connection.Write(jsonData)
+	}
+
+	fmt.Println("Server closing...")
+	os.Exit(0)
+}
+
 func (s *Server) sendPrivateMessage(message string, address string) {
 	targetNode := s.knownNodes[address]
 
@@ -204,7 +226,7 @@ func (s *Server) updateNewChannel(channel string, hostname string, nickname stri
 
 		if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
-			fmt.Println(nickname + " has left the channel.")
+			fmt.Printf("%s has left the channel.\n", nickname)
 		}
 	}
 
@@ -233,7 +255,7 @@ func (s *Server) updateChannelList(channel string, hostname string, nickname str
 
 		if channel == s.thisServer.Channel.ChannelName {
 			s.thisServer.Channel.ConnectedNodes[address] = *node
-			fmt.Println(nickname + " has joined the channel.")
+			fmt.Printf("%s has joined the channel.\n", nickname)
 
 			channelInfo, _ := json.Marshal(s.thisServer.Channel)
 			msg := model.Message{Type: "CHANNEL INFO", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
@@ -241,7 +263,7 @@ func (s *Server) updateChannelList(channel string, hostname string, nickname str
 			node.Connection.Write(jsonData)
 		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
-			fmt.Println(nickname + " has left the channel.")
+			fmt.Printf("%s has left the channel.\n", nickname)
 		}
 	}
 }
@@ -257,7 +279,7 @@ func (s *Server) joinChannel(channel string) {
 		s.thisServer.Channel = incomingChannel
 		s.thisServer.Channel.OrderMessages()
 		s.thisServer.Channel.PrintHistory()
-		fmt.Println(s.thisServer.Nickname + " has joined the channel.")
+		fmt.Printf("%s has joined the channel.\n", s.thisServer.Nickname)
 	}
 }
 
