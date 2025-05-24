@@ -16,10 +16,11 @@ import (
 )
 
 type Server struct {
-	thisServer   model.Node
-	knownNodes   map[string]*model.Node
-	knownMirrors []model.Node
-	channels     map[string]*model.Channel
+	thisServer            model.Node
+	knownNodes            map[string]*model.Node
+	knownMirrors          []model.Node
+	channels              map[string]*model.Channel
+	privateMessageHistory map[string][]model.Message
 }
 
 var defaultChannelName = "lobby"
@@ -63,6 +64,33 @@ func (s *Server) handleChannel(channelList []model.Channel) {
 	}
 }
 
+func (s *Server) handleMessage(incomingMsg model.Message) {
+	header := incomingMsg.Type
+
+	switch header {
+	case "NEW":
+		var incomingChannel []model.Channel
+		if err := json.Unmarshal([]byte(incomingMsg.Content), &incomingChannel); err != nil {
+			fmt.Println("Error unmarshaling Content into Channel:", err)
+			return
+		}
+
+		s.handleChannel(incomingChannel)
+		s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+	case "NEW CHANNEL":
+		s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+	case "UPDATE CHANNEL":
+		s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+	case "CHANNEL INFO":
+		s.joinChannel(incomingMsg.Content)
+	case "PM":
+		s.privateMessageHistory[incomingMsg.Nickname] = append(s.privateMessageHistory[incomingMsg.Nickname], incomingMsg)
+	default:
+		s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
+		fmt.Print(incomingMsg.PrintMessage())
+	}
+}
+
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
@@ -80,28 +108,7 @@ func (s *Server) connectionServer(conn net.Conn) {
 			}
 		}
 
-		header := incomingMsg.Type
-
-		switch header {
-		case "NEW":
-			var incomingChannel []model.Channel
-			if err := json.Unmarshal([]byte(incomingMsg.Content), &incomingChannel); err != nil {
-				fmt.Println("Error unmarshaling Content into Channel:", err)
-				return
-			}
-
-			s.handleChannel(incomingChannel)
-			s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-		case "NEW CHANNEL":
-			s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-		case "UPDATE CHANNEL":
-			s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-		case "CHANNEL INFO":
-			s.joinChannel(incomingMsg.Content)
-		default:
-			s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
-			fmt.Print(incomingMsg.PrintMessage())
-		}
+		s.handleMessage(incomingMsg)
 	}
 }
 
@@ -173,31 +180,20 @@ func (s *Server) connectToMirror() {
 	}
 }
 
-func (s *Server) loadMirrors() {
-	file, err := os.Open("mirrorlist.txt")
+func (s *Server) sendPrivateMessage(message string, address string) {
+	targetNode := s.knownNodes[address]
+
+	ts := time.Now()
+
+	msg := model.Message{Content: message, Nickname: s.thisServer.Nickname, Timestamp: ts, Type: "PM"}
+
+	jsonData, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Println("Error opening mirrorlist.txt:", err)
+		fmt.Println("Error encoding JSON:", err)
 		return
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		mirrorInfo := strings.Split(line, "++")
-		host, port, err := net.SplitHostPort(mirrorInfo[0])
-		nickname := mirrorInfo[1]
-		host = "[" + host + "]"
-		if err != nil {
-			fmt.Println("Error:", err)
-			continue
-		}
-		s.knownMirrors = append(s.knownMirrors, model.Node{Hostname: host, Port: port, Nickname: nickname})
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading mirrorlist.txt:", err)
-	}
+	targetNode.Connection.Write(jsonData)
 }
 
 // Channel Functions
@@ -260,6 +256,7 @@ func (s *Server) joinChannel(channel string) {
 	if channel != s.thisServer.Channel.ChannelName {
 		s.thisServer.Channel = incomingChannel
 		s.thisServer.Channel.OrderMessages()
+		s.thisServer.Channel.PrintHistory()
 		fmt.Println(s.thisServer.Nickname + " has joined the channel.")
 	}
 }
@@ -324,8 +321,84 @@ func (server *Server) ChangeChannel(channel string) {
 	}
 }
 
-func (server *Server) orderMessages() {
+func (server *Server) poll() {
+	var wg sync.WaitGroup
 
+	for address, node := range server.knownNodes {
+		wg.Add(1)
+		go server.pollNode(address, *node, &wg)
+	}
+
+	wg.Wait()
+}
+
+func (server *Server) pollNode(address string, node model.Node, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	fmt.Println("Polling node:", address)
+	timeout := 7 * time.Second
+	conn, err := net.DialTimeout("tcp", node.Address(), timeout)
+	if err != nil {
+		fmt.Println("Node timed out:", address, err)
+		server.removeNode(address)
+	} else {
+		conn.Close()
+	}
+}
+
+func (server *Server) removeNode(address string) {
+	if node, exists := server.thisServer.Channel.ConnectedNodes[address]; exists {
+		fmt.Println("Connection timed out:", node.Nickname)
+		delete(server.thisServer.Channel.ConnectedNodes, address)
+	} else {
+		for _, channel := range server.channels {
+			if _, exists := channel.ConnectedNodes[address]; exists {
+				delete(channel.ConnectedNodes, address)
+			}
+		}
+	}
+	delete(server.knownNodes, address)
+}
+
+func (server *Server) startPolling(wg *sync.WaitGroup) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			server.poll()
+		}
+	}
+
+	wg.Done()
+}
+
+func (s *Server) loadMirrors() {
+	file, err := os.Open("mirrorlist.txt")
+	if err != nil {
+		fmt.Println("Error opening mirrorlist.txt:", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		mirrorInfo := strings.Split(line, "++")
+		host, port, err := net.SplitHostPort(mirrorInfo[0])
+		nickname := mirrorInfo[1]
+		host = "[" + host + "]"
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+		s.knownMirrors = append(s.knownMirrors, model.Node{Hostname: host, Port: port, Nickname: nickname})
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Error reading mirrorlist.txt:", err)
+	}
 }
 
 func (server *Server) start() {
@@ -385,7 +458,12 @@ func main() {
 
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
 
-	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans}
+	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans, make(map[string][]model.Message)}
 
+	var pollWG sync.WaitGroup
+	pollWG.Add(1)
+	go server.startPolling(&pollWG)
 	server.start()
+
+	pollWG.Wait()
 }

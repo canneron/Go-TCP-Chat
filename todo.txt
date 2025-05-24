@@ -1,7 +1,4 @@
 IMMEDIATE
-- Remove servers when they exit
-- Send new clients message history
-- Private messaging
 - Basic UI
 
 EVENTUAL
