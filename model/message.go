@@ -3,17 +3,18 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"go-p2p/enum/headerType"
 	"strings"
 	"time"
 )
 
 type Message struct {
-	Type      string    `json:"type"`
-	Hostname  string    `json:"hostname"`
-	Port      string    `json:"port"`
-	Content   string    `json:"content"`
-	Nickname  string    `json:"nickname"`
-	Timestamp time.Time `json:"timestamp"`
+	Type      headerType.Type `json:"type"`
+	Hostname  string          `json:"hostname"`
+	Port      string          `json:"port"`
+	Content   string          `json:"content"`
+	Nickname  string          `json:"nickname"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
 func convertTime(ts time.Time) string {
@@ -29,7 +30,7 @@ func (message Message) ConstructPacket() string {
 	return fmt.Sprintf("%s;;%s;;%s", convertTime(message.Timestamp), message.Nickname, message.Content)
 }
 
-func (message Message) toJson() []byte {
+func (message Message) ToJson() []byte {
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		fmt.Println("Error marshalling JSON:", err)

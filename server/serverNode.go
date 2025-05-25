@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go-p2p/enum/headerType"
 	"go-p2p/model"
 	"io"
 	"net"
@@ -68,7 +69,8 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 	header := incomingMsg.Type
 
 	switch header {
-	case "NEW":
+	// New Node
+	case headerType.NewNode:
 		var incomingChannel []model.Channel
 		if err := json.Unmarshal([]byte(incomingMsg.Content), &incomingChannel); err != nil {
 			fmt.Println("Error unmarshaling Content into Channel:", err)
@@ -77,20 +79,28 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 
 		s.handleChannel(incomingChannel)
 		s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-	case "NEW CHANNEL":
+	// New Channel
+	case headerType.NewChannel:
 		s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-	case "UPDATE CHANNEL":
+	// Update Channel
+	case headerType.UpdateChannel:
 		s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
-	case "CHANNEL INFO":
+	// Channel Info
+	case headerType.ChannelInfo:
 		s.joinChannel(incomingMsg.Content)
-	case "PM":
+	// Private Message
+	case headerType.PrivateMessage:
 		s.privateMessageHistory[incomingMsg.Nickname] = append(s.privateMessageHistory[incomingMsg.Nickname], incomingMsg)
-	case "EXIT":
+	// Exit Message
+	case headerType.Exit:
 		address := fmt.Sprintf("%s:%s", incomingMsg.Hostname, incomingMsg.Port)
 		s.removeNode(address)
-	default:
+	// Chat Message
+	case headerType.ChatMessage:
 		s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 		fmt.Print(incomingMsg.PrintMessage())
+	default:
+		fmt.Println("Invalid message: {}", string(incomingMsg.ToJson()))
 	}
 }
 
@@ -131,7 +141,7 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 			continue
 		}
 
-		nodeInfo := model.Message{Type: "NEW", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now(), Content: string(channelListJSON)}
+		nodeInfo := model.Message{Type: headerType.NewNode, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now(), Content: string(channelListJSON)}
 
 		jsonData, err := json.Marshal(nodeInfo)
 		if err != nil {
@@ -186,7 +196,7 @@ func (s *Server) connectToMirror() {
 func (s *Server) exit() {
 	ts := time.Now()
 
-	msg := model.Message{Type: "EXIT", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts}
+	msg := model.Message{Type: headerType.Exit, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -207,7 +217,7 @@ func (s *Server) sendPrivateMessage(message string, address string) {
 
 	ts := time.Now()
 
-	msg := model.Message{Content: message, Nickname: s.thisServer.Nickname, Timestamp: ts, Type: "PM"}
+	msg := model.Message{Content: message, Nickname: s.thisServer.Nickname, Timestamp: ts, Type: headerType.PrivateMessage}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -258,7 +268,7 @@ func (s *Server) updateChannelList(channel string, hostname string, nickname str
 			fmt.Printf("%s has joined the channel.\n", nickname)
 
 			channelInfo, _ := json.Marshal(s.thisServer.Channel)
-			msg := model.Message{Type: "CHANNEL INFO", Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
+			msg := model.Message{Type: headerType.ChannelInfo, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
 			jsonData, _ := json.Marshal(msg)
 			node.Connection.Write(jsonData)
 		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
@@ -290,7 +300,7 @@ func (s *Server) sendMessageToChannel() {
 		text, _ := reader.ReadString('\n')
 		ts := time.Now()
 
-		msg := model.Message{Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
+		msg := model.Message{Type: headerType.ChatMessage, Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
 
 		if text == "EXIT\n" {
 			fmt.Println("Exit command received.")
@@ -314,7 +324,7 @@ func (s *Server) sendMessageToChannel() {
 
 func (server *Server) CreateChannel(name string) {
 	server.thisServer.Channel = model.NewChannel(name)
-	msg := model.Message{Type: "NEW CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+	msg := model.Message{Type: headerType.NewChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -331,7 +341,7 @@ func (server *Server) CreateChannel(name string) {
 
 func (server *Server) ChangeChannel(channel string) {
 	server.thisServer.Channel = model.NewChannel(channel)
-	msg := model.Message{Type: "UPDATE CHANNEL", Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channel, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+	msg := model.Message{Type: headerType.UpdateChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channel, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {

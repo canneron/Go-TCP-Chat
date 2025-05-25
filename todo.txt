@@ -8,3 +8,5 @@ EVENTUAL
 - Start more than one server
 - Fine grained settings for channels
 - More advanced UI
+- Compression of sent messages/items
+- Improved security
