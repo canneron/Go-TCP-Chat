@@ -1,12 +1,9 @@
 package utils
 
+import "slices"
+
 func Contains(slice []string, item string) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 func RemoveValue[T comparable](slice []T, value T) []T {

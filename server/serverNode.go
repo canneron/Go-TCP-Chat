@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"go-p2p/enum/headerType"
@@ -442,7 +443,14 @@ func (server *Server) start() {
 		defer wg.Done()
 		// Listener start up
 		portLN := ":" + server.thisServer.Port
-		listener, err := net.Listen("tcp", portLN)
+		cert, err := tls.LoadX509KeyPair("keystore/cert.pem", "keystore/cert.pem")
+		if err != nil {
+			fmt.Println("Error reading cert:", err)
+			os.Exit(1)
+		}
+
+		config := &tls.Config{Certificates: []tls.Certificate{cert}}
+		listener, err := tls.Listen("tcp", portLN, config)
 		if err != nil {
 			fmt.Println("Error starting TCP:", err)
 			os.Exit(1)
@@ -487,7 +495,6 @@ func main() {
 	}
 
 	nickname := chooseName()
-
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
 
 	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans, make(map[string][]model.Message)}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -8,11 +9,12 @@ import (
 )
 
 type Node struct {
-	Hostname   string   `json:"hostname"`
-	Port       string   `json:"port"`
-	Nickname   string   `json:"nickname"`
-	Connection net.Conn `json:"-"`
-	Channel    Channel  `json:"channel"`
+	Hostname    string          `json:"hostname"`
+	Port        string          `json:"port"`
+	Nickname    string          `json:"nickname"`
+	Connection  net.Conn        `json:"-"`
+	Certificate tls.Certificate `json:"-"`
+	Channel     Channel         `json:"channel"`
 }
 
 func (n Node) Address() string {
