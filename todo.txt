@@ -1,4 +1,7 @@
 IMMEDIATE
+- TLS
+> Configure config for P2P
+> Storing certs
 - Basic UI
 
 EVENTUAL
@@ -9,4 +12,3 @@ EVENTUAL
 - Fine grained settings for channels
 - More advanced UI
 - Compression of sent messages/items
-- Improved security

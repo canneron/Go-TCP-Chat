@@ -4,8 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"go-p2p/certs"
 	"go-p2p/enum/headerType"
 	"go-p2p/model"
 	"io"
@@ -443,14 +447,8 @@ func (server *Server) start() {
 		defer wg.Done()
 		// Listener start up
 		portLN := ":" + server.thisServer.Port
-		cert, err := tls.LoadX509KeyPair("keystore/cert.pem", "keystore/cert.pem")
-		if err != nil {
-			fmt.Println("Error reading cert:", err)
-			os.Exit(1)
-		}
 
-		config := &tls.Config{Certificates: []tls.Certificate{cert}}
-		listener, err := tls.Listen("tcp", portLN, config)
+		listener, err := tls.Listen("tcp", portLN, server.thisServer.ID.Config)
 		if err != nil {
 			fmt.Println("Error starting TCP:", err)
 			os.Exit(1)
@@ -482,6 +480,30 @@ func chooseName() string {
 	return text
 }
 
+func generateIdentification(nickname, host, port string) *model.Identification {
+	if _, err := os.Stat("certs/key.pem"); errors.Is(err, os.ErrNotExist) {
+		certs.GenerateCert(nickname, host, port)
+	}
+
+	keyStr, _ := os.ReadFile("certs/key.pem")
+	keyBlock, _ := pem.Decode(keyStr)
+	pk, _ := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+
+	certStr, _ := os.ReadFile("certs/certs.pem")
+
+	tlsCert, err := tls.X509KeyPair(certStr, keyStr)
+	if err != nil {
+		panic(err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	return &model.Identification{PrivateKey: pk, Certificate: &tlsCert, Config: tlsConfig}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run main.go <hostname> <port>")
@@ -495,7 +517,9 @@ func main() {
 	}
 
 	nickname := chooseName()
-	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
+	identification := generateIdentification(nickname, hostname, port)
+
+	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel, ID: identification}
 
 	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans, make(map[string][]model.Message)}
 

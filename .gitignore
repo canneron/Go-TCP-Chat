@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+certs/*
+!certs/*.go
+
 mirror/*
 !mirror/*.go
 
