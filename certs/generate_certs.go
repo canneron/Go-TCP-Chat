@@ -38,7 +38,7 @@ func GenerateCert(nickname, host, port string) {
 			x509.ExtKeyUsageClientAuth,
 		},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{address},
+		DNSNames:              []string{id},
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, &tempCert, &tempCert, key.Public(), key)
