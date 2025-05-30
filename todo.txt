@@ -8,6 +8,7 @@ EVENTUAL
 - Send files/images
 - Voice chat
 - Server Roles/Persistent Profiles
+- Encrypting messages
 - Start more than one server
 - Fine grained settings for channels
 - More advanced UI
