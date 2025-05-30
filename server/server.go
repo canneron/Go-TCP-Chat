@@ -49,7 +49,7 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 	return conn
 }
 
-func (s *Server) addNode(host string, port string, nickname string) {
+func (s *Server) addNode(host, port, nickname string) {
 	fmt.Println("node: {} {} {}", host, port, nickname)
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
 
@@ -217,7 +217,7 @@ func (s *Server) exit() {
 	os.Exit(0)
 }
 
-func (s *Server) sendPrivateMessage(message string, address string) {
+func (s *Server) sendPrivateMessage(message, address string) {
 	targetNode := s.knownNodes[address]
 
 	ts := time.Now()
@@ -234,7 +234,7 @@ func (s *Server) sendPrivateMessage(message string, address string) {
 }
 
 // Channel Functions
-func (s *Server) updateNewChannel(channel string, hostname string, nickname string, port string) {
+func (s *Server) updateNewChannel(channel, hostname, nickname, port string) {
 	address := hostname + ":" + port
 	if node, exists := s.knownNodes[address]; exists {
 		node.Channel = model.NewChannel(channel)
@@ -251,7 +251,7 @@ func (s *Server) updateNewChannel(channel string, hostname string, nickname stri
 	}
 }
 
-func (s *Server) updateChannelList(channel string, hostname string, nickname string, port string) {
+func (s *Server) updateChannelList(channel, hostname, nickname, port string) {
 	address := hostname + ":" + port
 	if node, exists := s.knownNodes[address]; exists {
 		if existingChan, exists := s.channels[node.Channel.ChannelName]; exists {
@@ -482,7 +482,7 @@ func chooseName() string {
 
 func generateIdentification(nickname, host, port string) *model.Identification {
 	if _, err := os.Stat("certs/key.pem"); errors.Is(err, os.ErrNotExist) {
-		certs.GenerateCert(nickname, host, port)
+		certs.GenerateCert(host, port)
 	}
 
 	keyStr, _ := os.ReadFile("certs/key.pem")

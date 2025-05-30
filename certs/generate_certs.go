@@ -12,16 +12,16 @@ import (
 	"time"
 )
 
-func GenerateCert(nickname, host, port string) {
+func GenerateCert(host, port string) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
-	id := fmt.Sprintf("%s:%s:%s", host, port, nickname)
+	address := fmt.Sprintf("%s:%s", host, port)
 	serialNum, _ := rand.Int(rand.Reader, new(big.Int))
 
 	tempCert := x509.Certificate{
 		SerialNumber: serialNum,
 		Subject: pkix.Name{
 			Organization: []string{"CC"},
-			CommonName:   id,
+			CommonName:   address,
 		},
 		NotBefore: time.Now(),
 		NotAfter:  time.Now().Add(365 * 24 * time.Hour),
@@ -32,7 +32,7 @@ func GenerateCert(nickname, host, port string) {
 			x509.ExtKeyUsageClientAuth,
 		},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{id},
+		DNSNames:              []string{address},
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, &tempCert, &tempCert, key.Public(), key)
