@@ -3,7 +3,6 @@ package certs
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -12,11 +11,6 @@ import (
 	"os"
 	"time"
 )
-
-type Identitfication struct {
-	PrivateKey  *rsa.PrivateKey
-	Certificate *tls.Certificate
-}
 
 func GenerateCert(nickname, host, port string) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
