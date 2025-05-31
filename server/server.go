@@ -38,14 +38,14 @@ var defaultChans = map[string]*model.Channel{
 func (s *Server) connectToNode(node model.Node) net.Conn {
 	fmt.Println("Connecting to node", node.Address())
 
-	conn, err := net.Dial("tcp", node.Address())
+	conn, err := tls.Dial("tcp", node.Address(), s.thisServer.ID.Config)
 	if err != nil {
 		fmt.Println("Error connecting to node:", err)
 		os.Exit(1)
 	}
 
 	node.Connection = conn
-	s.knownNodes[node.Address()] = &node
+	s.knownNodes[node.HashID()] = &node
 	return conn
 }
 
@@ -53,7 +53,7 @@ func (s *Server) addNode(host, port, nickname string) {
 	fmt.Println("node: {} {} {}", host, port, nickname)
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
 
-	if _, exists := s.knownNodes[node.Address()]; exists {
+	if _, exists := s.knownNodes[node.HashID()]; exists {
 		return
 	}
 
@@ -86,20 +86,19 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 		s.addNode(incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
 	// New Channel
 	case headerType.NewChannel:
-		s.updateNewChannel(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+		s.updateNewChannel(incomingMsg.Content, incomingMsg.Nickname, incomingMsg.HashID)
 	// Update Channel
 	case headerType.UpdateChannel:
-		s.updateChannelList(incomingMsg.Content, incomingMsg.Hostname, incomingMsg.Port, incomingMsg.Nickname)
+		s.updateChannelList(incomingMsg.Content, incomingMsg.Nickname, incomingMsg.HashID)
 	// Channel Info
 	case headerType.ChannelInfo:
 		s.joinChannel(incomingMsg.Content)
 	// Private Message
 	case headerType.PrivateMessage:
-		s.privateMessageHistory[incomingMsg.Nickname] = append(s.privateMessageHistory[incomingMsg.Nickname], incomingMsg)
+		s.privateMessageHistory[incomingMsg.Nickname] = append(s.privateMessageHistory[incomingMsg.HashID], incomingMsg)
 	// Exit Message
 	case headerType.Exit:
-		address := fmt.Sprintf("%s:%s", incomingMsg.Hostname, incomingMsg.Port)
-		s.removeNode(address)
+		s.removeNode(incomingMsg.HashID)
 	// Chat Message
 	case headerType.ChatMessage:
 		s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
@@ -132,7 +131,7 @@ func (s *Server) connectionServer(conn net.Conn) {
 
 func (s *Server) networkBroadcast(nodeList []model.Node) {
 	for _, node := range nodeList {
-		if node.Hostname == s.thisServer.Hostname && node.Port == s.thisServer.Port {
+		if node.HashID() == s.thisServer.HashID() {
 			continue
 		}
 		conn := s.connectToNode(node)
@@ -146,7 +145,7 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 			continue
 		}
 
-		nodeInfo := model.Message{Type: headerType.NewNode, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now(), Content: string(channelListJSON)}
+		nodeInfo := model.Message{Type: headerType.NewNode, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: time.Now(), Content: string(channelListJSON), HashID: s.thisServer.HashID()}
 
 		jsonData, err := json.Marshal(nodeInfo)
 		if err != nil {
@@ -201,7 +200,7 @@ func (s *Server) connectToMirror() {
 func (s *Server) exit() {
 	ts := time.Now()
 
-	msg := model.Message{Type: headerType.Exit, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts}
+	msg := model.Message{Type: headerType.Exit, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts, HashID: s.thisServer.HashID()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -222,7 +221,7 @@ func (s *Server) sendPrivateMessage(message, address string) {
 
 	ts := time.Now()
 
-	msg := model.Message{Content: message, Nickname: s.thisServer.Nickname, Timestamp: ts, Type: headerType.PrivateMessage}
+	msg := model.Message{Content: message, Nickname: s.thisServer.Nickname, Timestamp: ts, Type: headerType.PrivateMessage, HashID: s.thisServer.HashID()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -234,12 +233,11 @@ func (s *Server) sendPrivateMessage(message, address string) {
 }
 
 // Channel Functions
-func (s *Server) updateNewChannel(channel, hostname, nickname, port string) {
-	address := hostname + ":" + port
-	if node, exists := s.knownNodes[address]; exists {
+func (s *Server) updateNewChannel(channel, nickname, hashId string) {
+	if node, exists := s.knownNodes[hashId]; exists {
 		node.Channel = model.NewChannel(channel)
 
-		if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
+		if _, exists := s.thisServer.Channel.ConnectedNodes[hashId]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
 			fmt.Printf("%s has left the channel.\n", nickname)
 		}
@@ -251,11 +249,10 @@ func (s *Server) updateNewChannel(channel, hostname, nickname, port string) {
 	}
 }
 
-func (s *Server) updateChannelList(channel, hostname, nickname, port string) {
-	address := hostname + ":" + port
-	if node, exists := s.knownNodes[address]; exists {
+func (s *Server) updateChannelList(channel, nickname, hashId string) {
+	if node, exists := s.knownNodes[hashId]; exists {
 		if existingChan, exists := s.channels[node.Channel.ChannelName]; exists {
-			if _, exists := existingChan.ConnectedNodes[address]; exists {
+			if _, exists := existingChan.ConnectedNodes[hashId]; exists {
 				delete(existingChan.ConnectedNodes, node.Address())
 			}
 		} else {
@@ -269,14 +266,14 @@ func (s *Server) updateChannelList(channel, hostname, nickname, port string) {
 		}
 
 		if channel == s.thisServer.Channel.ChannelName {
-			s.thisServer.Channel.ConnectedNodes[address] = *node
+			s.thisServer.Channel.ConnectedNodes[hashId] = *node
 			fmt.Printf("%s has joined the channel.\n", nickname)
 
 			channelInfo, _ := json.Marshal(s.thisServer.Channel)
-			msg := model.Message{Type: headerType.ChannelInfo, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now()}
+			msg := model.Message{Type: headerType.ChannelInfo, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Content: string(channelInfo), Nickname: s.thisServer.Nickname, Timestamp: time.Now(), HashID: s.thisServer.HashID()}
 			jsonData, _ := json.Marshal(msg)
 			node.Connection.Write(jsonData)
-		} else if _, exists := s.thisServer.Channel.ConnectedNodes[address]; exists {
+		} else if _, exists := s.thisServer.Channel.ConnectedNodes[hashId]; exists {
 			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
 			fmt.Printf("%s has left the channel.\n", nickname)
 		}
@@ -305,7 +302,7 @@ func (s *Server) sendMessageToChannel() {
 		text, _ := reader.ReadString('\n')
 		ts := time.Now()
 
-		msg := model.Message{Type: headerType.ChatMessage, Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts}
+		msg := model.Message{Type: headerType.ChatMessage, Content: text, Nickname: s.thisServer.Nickname, Timestamp: ts, HashID: s.thisServer.HashID()}
 
 		if text == "EXIT\n" {
 			fmt.Println("Exit command received.")
@@ -322,14 +319,14 @@ func (s *Server) sendMessageToChannel() {
 			node.Connection.Write(jsonData)
 		}
 
-		conn, _ := net.Dial("tcp", s.thisServer.Address())
+		conn, _ := tls.Dial("tcp", s.thisServer.Address(), s.thisServer.ID.Config)
 		conn.Write(jsonData)
 	}
 }
 
 func (server *Server) CreateChannel(name string) {
 	server.thisServer.Channel = model.NewChannel(name)
-	msg := model.Message{Type: headerType.NewChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+	msg := model.Message{Type: headerType.NewChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: name, Nickname: server.thisServer.Nickname, Timestamp: time.Now(), HashID: server.thisServer.HashID()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -340,13 +337,13 @@ func (server *Server) CreateChannel(name string) {
 		node.Connection.Write(jsonData)
 	}
 
-	conn, _ := net.Dial("tcp", server.thisServer.Address())
+	conn, _ := tls.Dial("tcp", server.thisServer.Address(), server.thisServer.ID.Config)
 	conn.Write(jsonData)
 }
 
 func (server *Server) ChangeChannel(channel string) {
 	server.thisServer.Channel = model.NewChannel(channel)
-	msg := model.Message{Type: headerType.UpdateChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channel, Nickname: server.thisServer.Nickname, Timestamp: time.Now()}
+	msg := model.Message{Type: headerType.UpdateChannel, Hostname: server.thisServer.Hostname, Port: server.thisServer.Port, Content: channel, Nickname: server.thisServer.Nickname, Timestamp: time.Now(), HashID: server.thisServer.HashID()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -361,40 +358,53 @@ func (server *Server) ChangeChannel(channel string) {
 func (server *Server) poll() {
 	var wg sync.WaitGroup
 
-	for address, node := range server.knownNodes {
+	for hashId, node := range server.knownNodes {
 		wg.Add(1)
-		go server.pollNode(address, *node, &wg)
+		go server.pollNode(hashId, *node, &wg)
 	}
 
 	wg.Wait()
 }
 
-func (server *Server) pollNode(address string, node model.Node, wg *sync.WaitGroup) {
+func (server *Server) pollNode(hashId string, node model.Node, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	fmt.Println("Polling node:", address)
+	fmt.Println("Polling node:", node.Address())
 	timeout := 7 * time.Second
 	conn, err := net.DialTimeout("tcp", node.Address(), timeout)
 	if err != nil {
-		fmt.Println("Node timed out:", address, err)
-		server.removeNode(address)
+		fmt.Println("Node timed out:", node.Address(), err)
+		server.removeNode(hashId)
 	} else {
+		tlsConn := tls.Client(conn, server.thisServer.ID.Config)
+		tlsConn.SetDeadline(time.Now().Add(timeout))
+		err = tlsConn.Handshake()
+
+		if err != nil {
+			fmt.Println("TLS handshake failed:", node.Address(), err)
+			server.removeNode(hashId)
+
+			tlsConn.Close()
+			conn.Close()
+			return
+		}
+		tlsConn.Close()
 		conn.Close()
 	}
 }
 
-func (server *Server) removeNode(address string) {
-	if node, exists := server.thisServer.Channel.ConnectedNodes[address]; exists {
+func (server *Server) removeNode(hashId string) {
+	if node, exists := server.thisServer.Channel.ConnectedNodes[hashId]; exists {
 		fmt.Println("Connection timed out:", node.Nickname)
-		delete(server.thisServer.Channel.ConnectedNodes, address)
+		delete(server.thisServer.Channel.ConnectedNodes, hashId)
 	} else {
 		for _, channel := range server.channels {
-			if _, exists := channel.ConnectedNodes[address]; exists {
-				delete(channel.ConnectedNodes, address)
+			if _, exists := channel.ConnectedNodes[hashId]; exists {
+				delete(channel.ConnectedNodes, hashId)
 			}
 		}
 	}
-	delete(server.knownNodes, address)
+	delete(server.knownNodes, hashId)
 }
 
 func (server *Server) startPolling(wg *sync.WaitGroup) {
@@ -480,16 +490,16 @@ func chooseName() string {
 	return text
 }
 
-func generateIdentification(nickname, host, port string) *model.Identification {
-	if _, err := os.Stat("certs/key.pem"); errors.Is(err, os.ErrNotExist) {
+func generateIdentification(host, port string) *model.Identification {
+	if _, err := os.Stat("../certs/key.pem"); errors.Is(err, os.ErrNotExist) {
 		certs.GenerateCert(host, port)
 	}
 
-	keyStr, _ := os.ReadFile("certs/key.pem")
+	keyStr, _ := os.ReadFile("../certs/key.pem")
 	keyBlock, _ := pem.Decode(keyStr)
 	pk, _ := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
 
-	certStr, _ := os.ReadFile("certs/certs.pem")
+	certStr, _ := os.ReadFile("../certs/cert.pem")
 
 	tlsCert, err := tls.X509KeyPair(certStr, keyStr)
 	if err != nil {
@@ -517,7 +527,7 @@ func main() {
 	}
 
 	nickname := chooseName()
-	identification := generateIdentification(nickname, hostname, port)
+	identification := generateIdentification(hostname, port)
 
 	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel, ID: identification}
 

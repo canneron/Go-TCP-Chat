@@ -9,13 +9,18 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 func GenerateCert(host, port string) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	address := fmt.Sprintf("%s:%s", host, port)
-	serialNum, _ := rand.Int(rand.Reader, new(big.Int))
+	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		fmt.Println("Error generating serial num: ", err)
+		return
+	}
 
 	tempCert := x509.Certificate{
 		SerialNumber: serialNum,
@@ -41,8 +46,18 @@ func GenerateCert(host, port string) {
 		fmt.Println("Error generating cert: ", err)
 	}
 
-	certFile, _ := os.Create("cert.pem")
-	keyFile, _ := os.Create("key.pem")
+	certsDir := filepath.Join("..", "certs")
+
+	certPath := filepath.Join(certsDir, "cert.pem")
+	keyPath := filepath.Join(certsDir, "key.pem")
+	fmt.Println("Path: ", certPath)
+
+	certFile, err1 := os.Create(certPath)
+	keyFile, _ := os.Create(keyPath)
+
+	if err1 != nil {
+		fmt.Println("error,", err1)
+	}
 
 	pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 	certFile.Close()

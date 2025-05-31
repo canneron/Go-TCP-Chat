@@ -1,6 +1,10 @@
 package model
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,4 +32,38 @@ func (n Node) ToJson() []byte {
 	}
 
 	return jsonData
+}
+
+func (n Node) HashID() string {
+	data := fmt.Sprintf("%s:%s:%s", strings.TrimSpace(n.Hostname), strings.TrimSpace(n.Port), strings.TrimSpace(n.Nickname))
+
+	hash := sha256.New()
+	hash.Write([]byte(data))
+	hashBytes := hash.Sum(nil)
+
+	return fmt.Sprintf("%x", hashBytes)
+}
+
+func (n Node) SignHash() ([]byte, error) {
+	hashID := n.HashID()
+
+	hashBytes := []byte(hashID)
+
+	signature, err := rsa.SignPKCS1v15(rand.Reader, n.ID.PrivateKey, crypto.SHA256, hashBytes)
+	if err != nil {
+		return nil, fmt.Errorf("error signing hash: %v", err)
+	}
+
+	return signature, nil
+}
+
+func (n Node) VerifySignature(hashID string, signature []byte) (bool, error) {
+	hashBytes := []byte(hashID)
+
+	err := rsa.VerifyPKCS1v15(&n.ID.PrivateKey.PublicKey, crypto.SHA256, hashBytes, signature)
+	if err != nil {
+		return false, fmt.Errorf("verification failed: %v", err)
+	}
+
+	return true, nil
 }

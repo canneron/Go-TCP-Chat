@@ -14,6 +14,7 @@ type Message struct {
 	Port      string          `json:"port"`
 	Content   string          `json:"content"`
 	Nickname  string          `json:"nickname"`
+	HashID    string          `json:"HashId"`
 	Timestamp time.Time       `json:"timestamp"`
 }
 
