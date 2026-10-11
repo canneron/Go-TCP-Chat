@@ -1,7 +1,4 @@
 IMMEDIATE
-- TLS
-> Configure config for P2P
-> Storing certs
 - Basic UI
 
 EVENTUAL

@@ -12,12 +12,13 @@ import (
 )
 
 type Node struct {
-	Hostname   string          `json:"hostname"`
-	Port       string          `json:"port"`
-	Nickname   string          `json:"nickname"`
-	Connection net.Conn        `json:"-"`
-	Channel    Channel         `json:"channel"`
-	ID         *Identification `json:"-"`
+	Hostname      string          `json:"hostname"`
+	Port          string          `json:"port"`
+	Nickname      string          `json:"nickname"`
+	Connection    net.Conn        `json:"-"`
+	Channel       Channel         `json:"channel"`
+	ID            *Identification `json:"-"`
+	CAFingerprint string          `json:"-"`
 }
 
 func (n Node) Address() string {

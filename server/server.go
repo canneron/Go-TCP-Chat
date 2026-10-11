@@ -45,12 +45,17 @@ func (s *Server) connectToNode(node model.Node) net.Conn {
 	}
 
 	node.Connection = conn
-	s.knownNodes[node.HashID()] = &node
+	hashId := node.HashID()
+	s.knownNodes[hashId] = &node
+
+	if s.thisServer.Channel.ChannelName == defaultChannelName {
+		s.thisServer.Channel.ConnectedNodes[hashId] = node
+	}
 	return conn
 }
 
 func (s *Server) addNode(host, port, nickname string) {
-	fmt.Println("node: {} {} {}", host, port, nickname)
+	fmt.Printf("node: %s:%s %s\n", host, port, strings.TrimSpace(nickname))
 	node := model.Node{Hostname: host, Port: port, Nickname: nickname, Channel: defaultChannel}
 
 	if _, exists := s.knownNodes[node.HashID()]; exists {
@@ -60,12 +65,10 @@ func (s *Server) addNode(host, port, nickname string) {
 	s.connectToNode(node)
 }
 
-func (s *Server) handleChannel(channelList []model.Channel) {
-	for _, chanName := range channelList {
-		if _, exists := s.channels[chanName.ChannelName]; exists {
-			continue
-		} else {
-			s.channels[chanName.ChannelName] = &chanName
+func (s *Server) handleChannel(channelList map[string]*model.Channel) {
+	for name, channel := range channelList {
+		if _, exists := s.channels[name]; !exists {
+			s.channels[name] = channel
 		}
 	}
 }
@@ -76,7 +79,7 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 	switch header {
 	// New Node
 	case headerType.NewNode:
-		var incomingChannel []model.Channel
+		var incomingChannel map[string]*model.Channel
 		if err := json.Unmarshal([]byte(incomingMsg.Content), &incomingChannel); err != nil {
 			fmt.Println("Error unmarshaling Content into Channel:", err)
 			return
@@ -104,12 +107,56 @@ func (s *Server) handleMessage(incomingMsg model.Message) {
 		s.thisServer.Channel.ChatHistory = append(s.thisServer.Channel.ChatHistory, incomingMsg)
 		fmt.Print(incomingMsg.PrintMessage())
 	default:
-		fmt.Println("Invalid message: {}", string(incomingMsg.ToJson()))
+		fmt.Println("Invalid message:", string(incomingMsg.ToJson()))
 	}
+}
+
+func peerIdentity(conn net.Conn) (string, error) {
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return "", errors.New("not a TLS connection")
+	}
+	if err := tlsConn.Handshake(); err != nil {
+		return "", err
+	}
+
+	peerCerts := tlsConn.ConnectionState().PeerCertificates
+	if len(peerCerts) == 0 {
+		return "", errors.New("no peer certificate")
+	}
+	return peerCerts[0].Subject.CommonName, nil
+}
+
+func verifySender(msg model.Message, certAddr string) error {
+	sep := strings.LastIndex(certAddr, ":")
+	if sep < 0 {
+		return fmt.Errorf("cert CN %q is not host:port", certAddr)
+	}
+
+	if msg.Hostname != "" || msg.Port != "" {
+		claimed := model.Node{Hostname: msg.Hostname, Port: msg.Port}
+		if claimed.Address() != certAddr {
+			return fmt.Errorf("claims to be %s", claimed.Address())
+		}
+	}
+
+	certNode := model.Node{Hostname: certAddr[:sep], Port: certAddr[sep+1:], Nickname: msg.Nickname}
+	if msg.HashID != certNode.HashID() {
+		return errors.New("HashID does not match cert identity")
+	}
+
+	return nil
 }
 
 func (s *Server) connectionServer(conn net.Conn) {
 	defer conn.Close()
+
+	peerAddr, err := peerIdentity(conn)
+	if err != nil {
+		fmt.Println("Rejecting connection:", err)
+		return
+	}
+
 	decoder := json.NewDecoder(conn)
 
 	for {
@@ -123,6 +170,11 @@ func (s *Server) connectionServer(conn net.Conn) {
 				fmt.Println("Error reading message:", err)
 				return
 			}
+		}
+
+		if err := verifySender(incomingMsg, peerAddr); err != nil {
+			fmt.Println("Dropping message from", peerAddr+":", err)
+			continue
 		}
 
 		s.handleMessage(incomingMsg)
@@ -164,9 +216,10 @@ func (s *Server) networkBroadcast(nodeList []model.Node) {
 
 func (s *Server) connectToMirror() {
 	for _, mirror := range s.knownMirrors {
-		fmt.Println("Connecting to ", mirror.Nickname)
-
 		url := fmt.Sprintf("http://%s:%s/getNodes", mirror.Hostname, mirror.Port)
+		fmt.Println("Connecting to ", mirror.Nickname)
+		fmt.Println("URL:  ", url)
+
 		resp, err := http.Post(url, "application/json", bytes.NewBuffer(s.thisServer.ToJson()))
 		if err != nil {
 			fmt.Println("Error sending request:", err)
@@ -200,7 +253,7 @@ func (s *Server) connectToMirror() {
 func (s *Server) exit() {
 	ts := time.Now()
 
-	msg := model.Message{Type: headerType.Exit, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Timestamp: ts, HashID: s.thisServer.HashID()}
+	msg := model.Message{Type: headerType.Exit, Hostname: s.thisServer.Hostname, Port: s.thisServer.Port, Nickname: s.thisServer.Nickname, Timestamp: ts, HashID: s.thisServer.HashID()}
 
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
@@ -218,6 +271,10 @@ func (s *Server) exit() {
 
 func (s *Server) sendPrivateMessage(message, address string) {
 	targetNode := s.knownNodes[address]
+	if targetNode == nil {
+		fmt.Println("Target not found", address)
+		return
+	}
 
 	ts := time.Now()
 
@@ -238,7 +295,7 @@ func (s *Server) updateNewChannel(channel, nickname, hashId string) {
 		node.Channel = model.NewChannel(channel)
 
 		if _, exists := s.thisServer.Channel.ConnectedNodes[hashId]; exists {
-			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
+			delete(s.thisServer.Channel.ConnectedNodes, hashId)
 			fmt.Printf("%s has left the channel.\n", nickname)
 		}
 	}
@@ -253,14 +310,14 @@ func (s *Server) updateChannelList(channel, nickname, hashId string) {
 	if node, exists := s.knownNodes[hashId]; exists {
 		if existingChan, exists := s.channels[node.Channel.ChannelName]; exists {
 			if _, exists := existingChan.ConnectedNodes[hashId]; exists {
-				delete(existingChan.ConnectedNodes, node.Address())
+				delete(existingChan.ConnectedNodes, hashId)
 			}
 		} else {
 			fmt.Println("Channel not found:", node.Channel.ChannelName)
 		}
 
 		if newChannel, exists := s.channels[channel]; exists {
-			newChannel.ConnectedNodes[node.Address()] = *node
+			newChannel.ConnectedNodes[hashId] = *node
 		} else {
 			fmt.Println("Channel not found:", channel)
 		}
@@ -274,7 +331,7 @@ func (s *Server) updateChannelList(channel, nickname, hashId string) {
 			jsonData, _ := json.Marshal(msg)
 			node.Connection.Write(jsonData)
 		} else if _, exists := s.thisServer.Channel.ConnectedNodes[hashId]; exists {
-			delete(s.thisServer.Channel.ConnectedNodes, node.Address())
+			delete(s.thisServer.Channel.ConnectedNodes, hashId)
 			fmt.Printf("%s has left the channel.\n", nickname)
 		}
 	}
@@ -376,7 +433,10 @@ func (server *Server) pollNode(hashId string, node model.Node, wg *sync.WaitGrou
 		fmt.Println("Node timed out:", node.Address(), err)
 		server.removeNode(hashId)
 	} else {
-		tlsConn := tls.Client(conn, server.thisServer.ID.Config)
+		host, _, _ := net.SplitHostPort(node.Address())
+		config := server.thisServer.ID.Config.Clone()
+		config.ServerName = host
+		tlsConn := tls.Client(conn, config)
 		tlsConn.SetDeadline(time.Now().Add(timeout))
 		err = tlsConn.Handshake()
 
@@ -399,9 +459,7 @@ func (server *Server) removeNode(hashId string) {
 		delete(server.thisServer.Channel.ConnectedNodes, hashId)
 	} else {
 		for _, channel := range server.channels {
-			if _, exists := channel.ConnectedNodes[hashId]; exists {
-				delete(channel.ConnectedNodes, hashId)
-			}
+			delete(channel.ConnectedNodes, hashId)
 		}
 	}
 	delete(server.knownNodes, hashId)
@@ -432,15 +490,21 @@ func (s *Server) loadMirrors() {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Format: host:port++nickname++caFingerprint
 		mirrorInfo := strings.Split(line, "++")
+		if len(mirrorInfo) < 3 {
+			fmt.Println("Skipping mirror, expected host:port++nickname++caFingerprint:", line)
+			continue
+		}
 		host, port, err := net.SplitHostPort(mirrorInfo[0])
-		nickname := mirrorInfo[1]
-		host = "[" + host + "]"
 		if err != nil {
 			fmt.Println("Error:", err)
 			continue
 		}
-		s.knownMirrors = append(s.knownMirrors, model.Node{Hostname: host, Port: port, Nickname: nickname})
+		host = "[" + host + "]"
+		nickname := mirrorInfo[1]
+		fingerprint := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(mirrorInfo[2]), ":", ""))
+		s.knownMirrors = append(s.knownMirrors, model.Node{Hostname: host, Port: port, Nickname: nickname, CAFingerprint: fingerprint})
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -449,7 +513,6 @@ func (s *Server) loadMirrors() {
 }
 
 func (server *Server) start() {
-	server.loadMirrors()
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -490,16 +553,98 @@ func chooseName() string {
 	return text
 }
 
-func generateIdentification(host, port string) *model.Identification {
-	if _, err := os.Stat("../certs/key.pem"); errors.Is(err, os.ErrNotExist) {
-		certs.GenerateCert(host, port)
+func fetchCAPool(mirror model.Node) (*x509.CertPool, error) {
+	url := fmt.Sprintf("http://%s:%s/caCert", mirror.Hostname, mirror.Port)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetching CA cert from %s: %w", mirror.Nickname, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA cert: %w", err)
 	}
 
-	keyStr, _ := os.ReadFile("../certs/key.pem")
+	block, _ := pem.Decode(body)
+	if block == nil {
+		return nil, errors.New("mirror did not return a PEM CA cert")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing CA cert: %w", err)
+	}
+
+	if got := certs.Fingerprint(caCert); got != mirror.CAFingerprint {
+		return nil, fmt.Errorf("CA fingerprint mismatch for %s: got %s, pinned %s", mirror.Nickname, got, mirror.CAFingerprint)
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	return pool, nil
+}
+
+func certSignedBy(port string, pool *x509.CertPool) bool {
+	certPEM, err := os.ReadFile(certs.CertPath(port))
+	if err != nil {
+		return false
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false
+	}
+	_, err = cert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	return err == nil
+}
+
+func requestCert(host, port string, mirror model.Node) error {
+	csrPEM, err := certs.GenerateCSR(host, port)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%s/signCert", mirror.Hostname, mirror.Port)
+	resp, err := http.Post(url, "application/x-pem-file", bytes.NewReader(csrPEM))
+	if err != nil {
+		return fmt.Errorf("sending CSR to %s: %w", mirror.Nickname, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading signed cert: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("mirror rejected CSR: %s", body)
+	}
+
+	return certs.SaveCert(port, body)
+}
+
+func generateIdentification(host, port string, mirror model.Node) *model.Identification {
+	caPool, err := fetchCAPool(mirror)
+	if err != nil {
+		panic(err)
+	}
+
+	if !certSignedBy(port, caPool) {
+		if err := requestCert(host, port, mirror); err != nil {
+			panic(err)
+		}
+		if !certSignedBy(port, caPool) {
+			panic("cert from mirror is not signed by the pinned CA")
+		}
+	}
+
+	keyStr, _ := os.ReadFile(certs.KeyPath(port))
 	keyBlock, _ := pem.Decode(keyStr)
 	pk, _ := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
 
-	certStr, _ := os.ReadFile("../certs/cert.pem")
+	certStr, _ := os.ReadFile(certs.CertPath(port))
 
 	tlsCert, err := tls.X509KeyPair(certStr, keyStr)
 	if err != nil {
@@ -508,6 +653,9 @@ func generateIdentification(host, port string) *model.Identification {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
+		RootCAs:      caPool,
+		ClientCAs:    caPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS12,
 	}
 
@@ -527,11 +675,17 @@ func main() {
 	}
 
 	nickname := chooseName()
-	identification := generateIdentification(hostname, port)
 
-	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel, ID: identification}
+	serverNode := model.Node{Hostname: hostname, Port: port, Nickname: nickname, Channel: defaultChannel}
 
 	server := &Server{serverNode, make(map[string]*model.Node), []model.Node{}, defaultChans, make(map[string][]model.Message)}
+
+	server.loadMirrors()
+	if len(server.knownMirrors) == 0 {
+		fmt.Println("No mirrors available to sign certificate")
+		os.Exit(1)
+	}
+	server.thisServer.ID = generateIdentification(hostname, port, server.knownMirrors[0])
 
 	var pollWG sync.WaitGroup
 	pollWG.Add(1)
